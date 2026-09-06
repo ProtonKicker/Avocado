@@ -1,0 +1,2 @@
+[console_scripts]
+avocado = avocado_tui.__main__:main
