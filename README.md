@@ -21,6 +21,35 @@ Terminal-native Python scratchpad: edit a `.py` file on the left and see per-lin
 - Python 3.10+
 - A terminal that supports mouse events (recommended if you want to drag the divider)
 
+## Install for normal users (recommended)
+
+This installs `avocado` via `pipx` so you can run `avocado <file.py>` from anywhere without keeping a local clone of this repo.
+
+### macOS / Linux
+
+Safer 2-step:
+
+```bash
+tmp="$(mktemp)"
+curl -fsSLo "$tmp" https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.sh
+bash "$tmp"
+rm -f "$tmp"
+```
+
+Optional one-liner:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.sh | bash
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.ps1 | iex
+```
+
+If `avocado` isn’t found right away, open a new terminal window and try again.
+
 ## Quickstart (recommended, no venv activation)
 
 The wrapper scripts will:
