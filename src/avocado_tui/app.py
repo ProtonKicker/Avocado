@@ -23,16 +23,32 @@ from .prelude import build_prelude_source, prelude_line_count
 
 
 ACCENT = "#7ec850"
+TOOLBAR_LABEL = "ctrl+q quit  ctrl+n new  ctrl+s save  ctrl+o open  ctrl+r results"
+MIN_WINDOW_WIDTH = cell_len(f" {TOOLBAR_LABEL} ")
+MIN_LEFT_PANEL_WIDTH = (MIN_WINDOW_WIDTH + 1) // 2
+TEXTAREA_FRAME_WIDTH = 2
+MIN_EDITOR_WIDGET_WIDTH = MIN_LEFT_PANEL_WIDTH + TEXTAREA_FRAME_WIDTH
+MIN_WINDOW_HEIGHT = 7
+MIN_CONTENT_HEIGHT = 5
 
 
 class OpenFileScreen(ModalScreen[Optional[str]]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
+    def __init__(
+        self, initial_path: str = "", placeholder: str = "Open file path…"
+    ) -> None:
+        super().__init__()
+        self._initial_path = initial_path
+        self._placeholder = placeholder
+
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Open file path…", id="path")
+        yield Input(value=self._initial_path, placeholder=self._placeholder, id="path")
 
     def on_mount(self) -> None:
-        self.query_one(Input).focus()
+        input_widget = self.query_one(Input)
+        input_widget.focus()
+        input_widget.cursor_position = len(input_widget.value)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         value = event.value.strip()
@@ -113,7 +129,12 @@ class Divider(Static):
         results = app.query_one("#results", TextArea)
         screen_w = app.size.width
         new_width = screen_w - event.screen_x - 1
-        app._results_width = max(MIN_RESULTS_WIDTH, min(MAX_RESULTS_WIDTH, new_width))
+        max_results_width = max(
+            MIN_RESULTS_WIDTH, screen_w - MIN_EDITOR_WIDGET_WIDTH - 1
+        )
+        app._results_width = max(
+            MIN_RESULTS_WIDTH, min(MAX_RESULTS_WIDTH, max_results_width, new_width)
+        )
         results.styles.width = app._results_width
         app.refresh(layout=True)
         app._evaluate_now()
@@ -151,80 +172,92 @@ class HorizontalSplit(Static):
             text.append(line_char * width)
             return text
         label_part = f" {self._label} "
-        label_len = len(label_part)
-        line_len = max(0, width - label_len)
+        label_text = Text(label_part, style="bold", no_wrap=True)
+        if label_text.cell_len >= width:
+            label_text.truncate(width, overflow="ellipsis")
+            return label_text
+        line_len = max(0, width - label_text.cell_len)
         text.append(line_char * line_len)
-        text.append(label_part, style="bold")
+        text.append_text(label_text)
         return text
 
 
 class AvocadoApp(App):
     CSS = """
-    Screen {
+    Screen {{
         background: #0b0b0f;
         color: #e8e8f0;
-    }
+    }}
 
-    #banner {
-        height: 2;
+    #banner {{
+        height: 1;
         padding: 0 1;
         color: #cfd0da;
         background: #0b0b0f;
         overflow: hidden hidden;
         text-wrap: nowrap;
         text-overflow: clip;
-    }
+    }}
 
-    #hsplit {
+    #hsplit {{
         height: 1;
         background: #0b0b0f;
         color: #3a3d45;
-    }
+    }}
 
-    #body {
+    #toolbar {{
+        height: 1;
+        background: #0b0b0f;
+        color: #3a3d45;
+    }}
+
+    #body {{
         height: 1fr;
-    }
+    }}
 
-    #editor {
+    #editor {{
         width: 1fr;
+        min-width: {min_editor_widget_width};
         height: 100%;
         border: none;
         background: #0b0b0f;
-    }
+    }}
 
-    #divider {
+    #divider {{
         width: 1;
         height: 100%;
         background: #0b0b0f;
         color: #3a3d45;
-    }
+    }}
 
-    #divider:hover {
+    #divider:hover {{
         background: #0b0b0f;
         color: #5a5e69;
-    }
+    }}
 
-    #divider.-dragging {
+    #divider.-dragging {{
         background: #0b0b0f;
         color: #7ec850;
-    }
+    }}
 
-    #results {
+    #results {{
         width: 44;
         height: 100%;
         border: none;
         background: #0b0b0f;
         color: #cfd0da;
-    }
+    }}
 
-    """
+    """.format(
+        min_editor_widget_width=MIN_EDITOR_WIDGET_WIDTH,
+    )
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+n", "new_file", "New file"),
         ("ctrl+s", "save", "Save"),
         ("ctrl+o", "open", "Open"),
-        ("ctrl+r", "run", "Run"),
-        ("ctrl+backslash", "toggle_results", "Toggle results"),
+        ("ctrl+r", "toggle_results", "Toggle results"),
     ]
 
     def __init__(self, file_path: str | None = None) -> None:
@@ -270,6 +303,10 @@ class AvocadoApp(App):
                 )
                 results.can_focus = False
                 yield results
+            yield HorizontalSplit(
+                TOOLBAR_LABEL,
+                id="toolbar",
+            )
 
     def on_mount(self) -> None:
         self._apply_results_width()
@@ -286,15 +323,21 @@ class AvocadoApp(App):
             return
         self._schedule_evaluate()
 
-    def on_resize(self) -> None:
+    async def _on_resize(self, event: events.Resize) -> None:
+        await super()._on_resize(event)
         self._evaluate_now()
         self._update_banner()
-
-    def action_run(self) -> None:
-        self._evaluate_now()
+        self.call_later(self._update_banner)
 
     def action_open(self) -> None:
         self.push_screen(OpenFileScreen(), self._open_file_callback)
+
+    def action_new_file(self) -> None:
+        base_dir = self._file_path.parent if self._file_path else Path.cwd()
+        suggested = str(base_dir / "untitled.py")
+        self.push_screen(
+            OpenFileScreen(suggested, "New file path…"), self._new_file_callback
+        )
 
     def _open_file_callback(self, path: Optional[str]) -> None:
         if not path:
@@ -308,6 +351,17 @@ class AvocadoApp(App):
             editor.text = p.read_text(encoding="utf-8")
         else:
             editor.text = ""
+        self._update_banner()
+        self._evaluate_now()
+
+    def _new_file_callback(self, path: Optional[str]) -> None:
+        if not path:
+            return
+
+        self._file_path = Path(path).expanduser().resolve(strict=False)
+        editor = self.query_one("#editor", TextArea)
+        editor.text = ""
+        editor.focus()
         self._update_banner()
         self._evaluate_now()
 
@@ -354,6 +408,12 @@ class AvocadoApp(App):
     def _apply_results_width(self) -> None:
         results = self.query_one("#results", TextArea)
         divider = self.query_one("#divider", Static)
+        max_results_width = max(
+            MIN_RESULTS_WIDTH, self.size.width - MIN_EDITOR_WIDGET_WIDTH - 1
+        )
+        self._results_width = max(
+            MIN_RESULTS_WIDTH, min(MAX_RESULTS_WIDTH, max_results_width, self._results_width)
+        )
         if self._results_visible:
             results.styles.display = "block"
             results.styles.width = self._results_width
@@ -378,21 +438,24 @@ class AvocadoApp(App):
             return "…"
         return text[: width - 1] + "…"
 
+    def _truncate_filename(self, file_name: str, width: int) -> str:
+        if width <= 0:
+            return ""
+        if cell_len(file_name) <= width:
+            return file_name
+        suffix = Path(file_name).suffix
+        if suffix and cell_len(suffix) + 2 <= width:
+            prefix_w = width - cell_len(suffix) - 1
+            return file_name[:prefix_w] + "…" + suffix
+        return self._truncate_banner_text(file_name, width)
+
     def _update_banner(self) -> None:
         banner = self.query_one("#banner", Static)
-        content_w = max(1, self.size.width - 2)
+        content_w = max(1, banner.content_region.width, self.size.width - 2)
         app_name = "Avocado"
         app_name_w = cell_len(app_name)
-        help_label = "ctrl+q quit  ctrl+s save  ctrl+o open  ctrl+r run  ctrl+\\ toggle results"
 
         first_line = Text(no_wrap=True)
-        second_line = Text(
-            self._truncate_banner_text(help_label, content_w),
-            style="#8b8d97",
-            no_wrap=True,
-        )
-        if second_line.cell_len < content_w:
-            second_line.append(" " * (content_w - second_line.cell_len))
 
         if self._file_path is None:
             first_line.append(app_name, style=ACCENT)
@@ -402,15 +465,16 @@ class AvocadoApp(App):
         else:
             path_str = str(self._file_path)
             file_name = self._file_path.name
-            available_right_w = max(1, content_w - (app_name_w + 1))
-            self._banner_path_visible = cell_len(path_str) <= available_right_w
+            available_right_w = max(1, content_w - (app_name_w + 2))
+            self._banner_path_visible = cell_len(path_str) <= max(0, available_right_w - 1)
 
             if self._banner_path_visible:
                 right_display = path_str
             else:
-                right_display = self._truncate_banner_text(file_name, available_right_w)
+                right_display = self._truncate_filename(file_name, available_right_w)
             right_display_w = cell_len(right_display)
-            gap_w = max(1, content_w - app_name_w - right_display_w)
+            right_display_used_w = min(available_right_w, right_display_w) + 1
+            gap_w = max(1, content_w - app_name_w - right_display_used_w)
 
             first_line.append(app_name, style=ACCENT)
             first_line.append(" " * gap_w)
@@ -433,12 +497,9 @@ class AvocadoApp(App):
             else:
                 self._banner_filename_start_x = self._banner_right_start_x
                 first_line.append(right_display, style=ACCENT)
+            first_line.append(" ")
 
         if first_line.cell_len < content_w:
             first_line.append(" " * (content_w - first_line.cell_len))
 
-        banner_text = Text()
-        banner_text.append_text(first_line)
-        banner_text.append("\n")
-        banner_text.append_text(second_line)
-        banner.update(banner_text)
+        banner.update(first_line)
