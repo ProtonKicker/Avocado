@@ -3,13 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from rich.table import Table
+from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import Input, Static, TextArea
 
+from .config import (
+    MAX_RESULTS_WIDTH,
+    MIN_RESULTS_WIDTH,
+    load_results_width,
+    save_results_width,
+)
 from .evaluator import evaluate_source_linewise, truncate_lines
+from .prelude import build_prelude_source, prelude_line_count
 
 
 class OpenFileScreen(ModalScreen[Optional[str]]):
@@ -42,6 +52,42 @@ class SyncedEditor(TextArea):
             results.scroll_to(y=new_value, animate=False, immediate=True)
 
 
+class Divider(Static):
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        app._dragging = True
+        self.set_class(True, "-dragging")
+        self.capture_mouse()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        if not app._dragging:
+            return
+        app._dragging = False
+        self.set_class(False, "-dragging")
+        self.release_mouse()
+        save_results_width(app._file_path, app._results_width)
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        if not app._dragging:
+            return
+
+        results = app.query_one("#results", TextArea)
+        screen_w = app.size.width
+        new_width = screen_w - event.screen_x - 1
+        app._results_width = max(MIN_RESULTS_WIDTH, min(MAX_RESULTS_WIDTH, new_width))
+        results.styles.width = app._results_width
+        app.refresh(layout=True)
+        app._evaluate_now()
+
+
 class AvocadoApp(App):
     CSS = """
     Screen {
@@ -49,8 +95,15 @@ class AvocadoApp(App):
         color: #e8e8f0;
     }
 
+    #banner {
+        height: 1;
+        padding: 0 1;
+        color: #cfd0da;
+        background: #0b0b0f;
+    }
+
     #body {
-        height: 100%;
+        height: 1fr;
     }
 
     #editor {
@@ -60,21 +113,31 @@ class AvocadoApp(App):
         background: #0b0b0f;
     }
 
+    #divider {
+        width: 1;
+        height: 100%;
+        background: #1a1a22;
+        color: #4a4a55;
+    }
+
+    #divider:hover {
+        background: #2a2a35;
+        color: #8a8a95;
+    }
+
+    #divider.-dragging {
+        background: #3a3a48;
+        color: #cfd0da;
+    }
+
     #results {
         width: 44;
         height: 100%;
         border: none;
-        border-left: tall #2a2a32;
         background: #0b0b0f;
         color: #cfd0da;
     }
 
-    #status {
-        height: 1;
-        padding: 0 1;
-        color: #8f90a0;
-        background: #0b0b0f;
-    }
     """
 
     BINDINGS = [
@@ -82,30 +145,42 @@ class AvocadoApp(App):
         ("ctrl+s", "save", "Save"),
         ("ctrl+o", "open", "Open"),
         ("ctrl+r", "run", "Run"),
+        ("ctrl+right", "widen_results", "Widen results"),
+        ("ctrl+left", "narrow_results", "Narrow results"),
+        ("ctrl+backslash", "toggle_results", "Toggle results"),
     ]
+
+    RESIZE_STEP = 4
 
     def __init__(self, file_path: str | None = None) -> None:
         super().__init__()
-        self._file_path = Path(file_path).expanduser() if file_path else None
+        self._file_path = (
+            Path(file_path).expanduser().resolve(strict=False) if file_path else None
+        )
         self._eval_timer: Timer | None = None
+        self._results_width: int = load_results_width(self._file_path)
+        self._dragging = False
+        self._results_visible = True
 
     def compose(self) -> ComposeResult:
         with Vertical():
+            yield Static("", id="banner")
             with Horizontal(id="body"):
                 yield SyncedEditor.code_editor(
                     "",
                     language=None,
-                    theme="monokai",
+                    theme="css",
                     soft_wrap=False,
                     show_line_numbers=False,
                     compact=True,
                     highlight_cursor_line=False,
                     id="editor",
                 )
+                yield Divider("│", id="divider")
                 results = TextArea.code_editor(
                     "",
                     language=None,
-                    theme="monokai",
+                    theme="css",
                     soft_wrap=False,
                     show_line_numbers=False,
                     read_only=True,
@@ -116,14 +191,14 @@ class AvocadoApp(App):
                 )
                 results.can_focus = False
                 yield results
-            yield Static("", id="status")
 
     def on_mount(self) -> None:
+        self._apply_results_width()
         editor = self.query_one("#editor", TextArea)
         if self._file_path and self._file_path.exists():
             editor.text = self._file_path.read_text(encoding="utf-8")
         editor.focus()
-        self._update_status()
+        self._update_banner()
         self._evaluate_now()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -144,7 +219,7 @@ class AvocadoApp(App):
         if not path:
             return
 
-        p = Path(path).expanduser()
+        p = Path(path).expanduser().resolve(strict=False)
         self._file_path = p
 
         editor = self.query_one("#editor", TextArea)
@@ -152,7 +227,7 @@ class AvocadoApp(App):
             editor.text = p.read_text(encoding="utf-8")
         else:
             editor.text = ""
-        self._update_status()
+        self._update_banner()
         self._evaluate_now()
 
     def action_save(self) -> None:
@@ -167,8 +242,8 @@ class AvocadoApp(App):
     def _save_as_callback(self, path: Optional[str]) -> None:
         if not path:
             return
-        self._file_path = Path(path).expanduser()
-        self._update_status()
+        self._file_path = Path(path).expanduser().resolve(strict=False)
+        self._update_banner()
         self.action_save()
 
     def _schedule_evaluate(self) -> None:
@@ -180,18 +255,72 @@ class AvocadoApp(App):
         editor = self.query_one("#editor", TextArea)
         results = self.query_one("#results", TextArea)
 
-        out = evaluate_source_linewise(editor.text)
-        width = max(1, results.size.width - 1)
-        cropped = truncate_lines(out.lines, width)
+        user_lines = editor.text.split("\n")
+        out = evaluate_source_linewise(
+            build_prelude_source() + editor.text
+        )
+        user_outputs = out.lines[prelude_line_count():]
+        if len(user_outputs) < len(user_lines):
+            user_outputs = user_outputs + [""] * (len(user_lines) - len(user_outputs))
+        else:
+            user_outputs = user_outputs[: len(user_lines)]
+        width = max(1, self._results_width - 1)
+        cropped = truncate_lines(user_outputs, width)
         results.text = "\n".join(cropped)
         if round(results.scroll_y) != round(editor.scroll_y):
             results.scroll_to(y=editor.scroll_y, animate=False, immediate=True)
 
-    def _update_status(self) -> None:
-        status = self.query_one("#status", Static)
-        if self._file_path is None:
-            status.update("avocado  |  Ctrl+O open  Ctrl+S save  Ctrl+Q quit")
+    def _apply_results_width(self) -> None:
+        results = self.query_one("#results", TextArea)
+        divider = self.query_one("#divider", Static)
+        if self._results_visible:
+            results.styles.display = "block"
+            results.styles.width = self._results_width
+            divider.styles.display = "block"
+        else:
+            results.styles.display = "none"
+            divider.styles.display = "none"
+        self.refresh(layout=True)
+        self._evaluate_now()
+        self._update_banner()
+
+    def _set_results_width(self, width: int) -> None:
+        self._results_width = max(MIN_RESULTS_WIDTH, min(MAX_RESULTS_WIDTH, width))
+        self._apply_results_width()
+        save_results_width(self._file_path, self._results_width)
+
+    def action_widen_results(self) -> None:
+        if not self._results_visible:
+            self._results_visible = True
+        self._set_results_width(self._results_width + self.RESIZE_STEP)
+
+    def action_narrow_results(self) -> None:
+        if not self._results_visible:
             return
-        status.update(
-            f"avocado {self._file_path}  |  Ctrl+O open  Ctrl+S save  Ctrl+Q quit"
-        )
+        self._set_results_width(self._results_width - self.RESIZE_STEP)
+
+    def action_toggle_results(self) -> None:
+        self._results_visible = not self._results_visible
+        self._apply_results_width()
+
+    def _update_banner(self) -> None:
+        banner = self.query_one("#banner", Static)
+
+        if self._file_path is None:
+            left = Text("avocado", style="#f8d66d", overflow="ellipsis", no_wrap=True)
+            right = Text("", overflow="ellipsis", no_wrap=True)
+        else:
+            left = Text(self._file_path.name, style="#f8d66d", overflow="ellipsis", no_wrap=True)
+            path_str = str(self._file_path)
+            right = Text(path_str, style="#8b8d97", overflow="ellipsis", no_wrap=True)
+            idx = path_str.rfind("\\")
+            if idx == -1:
+                idx = path_str.rfind("/")
+            if idx != -1 and idx + 1 < len(path_str):
+                right.stylize("#cfd0da", idx + 1, len(path_str))
+
+        grid = Table.grid(expand=True)
+        grid.add_column(ratio=1, overflow="ellipsis", no_wrap=True)
+        grid.add_column(justify="right", overflow="ellipsis", no_wrap=True)
+        grid.add_row(left, right)
+        banner.update(grid)

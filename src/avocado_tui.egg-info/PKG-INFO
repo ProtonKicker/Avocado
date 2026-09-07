@@ -23,7 +23,13 @@ python -m pip install -e .
 ## Run
 
 ```bash
-avocado examples/demo.py
+./avocado.sh examples/demo.py
+```
+
+## Run (Windows PowerShell)
+
+```powershell
+.\avocado.ps1 examples\demo.py
 ```
 
 ## Keys
