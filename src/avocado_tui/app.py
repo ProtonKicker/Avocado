@@ -23,7 +23,7 @@ from .prelude import build_prelude_source, prelude_line_count
 
 
 ACCENT = "#7ec850"
-TOOLBAR_LABEL = "ctrl+q quit  ctrl+n new  ctrl+s save  ctrl+o open  ctrl+r results"
+TOOLBAR_LABEL = "ctrl+q quit  ctrl+n new  ctrl+s save  ctrl+r results"
 MIN_WINDOW_WIDTH = cell_len(f" {TOOLBAR_LABEL} ")
 MIN_LEFT_PANEL_WIDTH = (MIN_WINDOW_WIDTH + 1) // 2
 TEXTAREA_FRAME_WIDTH = 2
@@ -256,7 +256,6 @@ class AvocadoApp(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+n", "new_file", "New file"),
         ("ctrl+s", "save", "Save"),
-        ("ctrl+o", "open", "Open"),
         ("ctrl+r", "toggle_results", "Toggle results"),
     ]
 
@@ -329,30 +328,12 @@ class AvocadoApp(App):
         self._update_banner()
         self.call_later(self._update_banner)
 
-    def action_open(self) -> None:
-        self.push_screen(OpenFileScreen(), self._open_file_callback)
-
     def action_new_file(self) -> None:
         base_dir = self._file_path.parent if self._file_path else Path.cwd()
         suggested = str(base_dir / "untitled.py")
         self.push_screen(
             OpenFileScreen(suggested, "New file path…"), self._new_file_callback
         )
-
-    def _open_file_callback(self, path: Optional[str]) -> None:
-        if not path:
-            return
-
-        p = Path(path).expanduser().resolve(strict=False)
-        self._file_path = p
-
-        editor = self.query_one("#editor", TextArea)
-        if p.exists():
-            editor.text = p.read_text(encoding="utf-8")
-        else:
-            editor.text = ""
-        self._update_banner()
-        self._evaluate_now()
 
     def _new_file_callback(self, path: Optional[str]) -> None:
         if not path:
