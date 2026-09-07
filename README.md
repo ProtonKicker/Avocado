@@ -21,9 +21,31 @@ Terminal-native Python scratchpad: edit a `.py` file on the left and see per-lin
 - Python 3.10+
 - A terminal that supports mouse events (recommended if you want to drag the divider)
 
+## Fast install (recommended)
+
+This downloads the repo as a zip, installs it into a dedicated virtual environment, and drops an `avocado` launcher into your user bin directory (no `pipx`, no system Python changes).
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.sh | bash
+```
+
+If `avocado` isn’t found, open a new terminal and make sure `~/.local/bin` is on your PATH.
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.ps1 | iex
+```
+
+If `avocado` isn’t found, open a new terminal window and try again.
+
 ## Fast install (clone, install, delete)
 
 This installs the `avocado` command into your user Python environment, then you can delete the cloned folder.
+
+On some systems this may fail with `externally-managed-environment` (PEP 668). If that happens, use the `pipx` install above.
 
 ### macOS / Linux
 
@@ -38,8 +60,6 @@ rm -rf Avocado
 avocado --help
 ```
 
-If `avocado` isn’t found, make sure `~/.local/bin` is on your PATH, then open a new terminal.
-
 ### Windows (PowerShell)
 
 ```powershell
@@ -52,8 +72,6 @@ Remove-Item -Recurse -Force .\Avocado
 
 avocado --help
 ```
-
-If `avocado` isn’t found, open a new terminal window and try again.
 
 ## Quickstart (recommended, no venv activation)
 
