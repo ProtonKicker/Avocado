@@ -67,8 +67,8 @@ def evaluate_source_linewise(source: str, *, stop_on_error: bool = True) -> Eval
                 outputs.append(repr(ns[assigned[0]]).replace("\n", "\\n"))
             else:
                 outputs.append("")
-        except Exception as e:
-            outputs.append(f"Error: {type(e).__name__}: {e}".replace("\n", "\\n"))
+        except Exception:
+            outputs.append("Error")
             error_seen = True
 
     return EvalOutput(lines=outputs, namespace=ns)

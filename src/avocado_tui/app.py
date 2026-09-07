@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import Input, Static, TextArea
@@ -29,28 +29,51 @@ class OpenFileScreen(ModalScreen[Optional[str]]):
         self.dismiss(None)
 
 
+class SyncedEditor(TextArea):
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_y(old_value, new_value)
+        if self.app is None:
+            return
+        try:
+            results = self.app.query_one("#results", TextArea)
+        except Exception:
+            return
+        if round(results.scroll_y) != round(new_value):
+            results.scroll_to(y=new_value, animate=False, immediate=True)
+
+
 class AvocadoApp(App):
     CSS = """
     Screen {
-        background: #ffffff;
-        color: #111111;
+        background: #0b0b0f;
+        color: #e8e8f0;
     }
 
-    Horizontal {
+    #body {
         height: 100%;
     }
 
     #editor {
         width: 1fr;
         height: 100%;
-        border: tall #e6e6e6;
+        border: none;
+        background: #0b0b0f;
     }
 
     #results {
-        width: 48;
+        width: 44;
         height: 100%;
-        border: tall #e6e6e6;
+        border: none;
+        border-left: tall #2a2a32;
+        background: #0b0b0f;
+        color: #cfd0da;
+    }
+
+    #status {
+        height: 1;
         padding: 0 1;
+        color: #8f90a0;
+        background: #0b0b0f;
     }
     """
 
@@ -67,15 +90,40 @@ class AvocadoApp(App):
         self._eval_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield TextArea(id="editor")
-            yield Static("", id="results")
+        with Vertical():
+            with Horizontal(id="body"):
+                yield SyncedEditor.code_editor(
+                    "",
+                    language=None,
+                    theme="monokai",
+                    soft_wrap=False,
+                    show_line_numbers=False,
+                    compact=True,
+                    highlight_cursor_line=False,
+                    id="editor",
+                )
+                results = TextArea.code_editor(
+                    "",
+                    language=None,
+                    theme="monokai",
+                    soft_wrap=False,
+                    show_line_numbers=False,
+                    read_only=True,
+                    show_cursor=False,
+                    highlight_cursor_line=False,
+                    compact=True,
+                    id="results",
+                )
+                results.can_focus = False
+                yield results
+            yield Static("", id="status")
 
     def on_mount(self) -> None:
         editor = self.query_one("#editor", TextArea)
         if self._file_path and self._file_path.exists():
             editor.text = self._file_path.read_text(encoding="utf-8")
         editor.focus()
+        self._update_status()
         self._evaluate_now()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -104,6 +152,7 @@ class AvocadoApp(App):
             editor.text = p.read_text(encoding="utf-8")
         else:
             editor.text = ""
+        self._update_status()
         self._evaluate_now()
 
     def action_save(self) -> None:
@@ -119,6 +168,7 @@ class AvocadoApp(App):
         if not path:
             return
         self._file_path = Path(path).expanduser()
+        self._update_status()
         self.action_save()
 
     def _schedule_evaluate(self) -> None:
@@ -128,10 +178,20 @@ class AvocadoApp(App):
 
     def _evaluate_now(self) -> None:
         editor = self.query_one("#editor", TextArea)
-        results = self.query_one("#results", Static)
+        results = self.query_one("#results", TextArea)
 
         out = evaluate_source_linewise(editor.text)
         width = max(1, results.size.width - 1)
         cropped = truncate_lines(out.lines, width)
-        results.update("\n".join(cropped))
+        results.text = "\n".join(cropped)
+        if round(results.scroll_y) != round(editor.scroll_y):
+            results.scroll_to(y=editor.scroll_y, animate=False, immediate=True)
 
+    def _update_status(self) -> None:
+        status = self.query_one("#status", Static)
+        if self._file_path is None:
+            status.update("avocado  |  Ctrl+O open  Ctrl+S save  Ctrl+Q quit")
+            return
+        status.update(
+            f"avocado {self._file_path}  |  Ctrl+O open  Ctrl+S save  Ctrl+Q quit"
+        )
