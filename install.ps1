@@ -9,6 +9,7 @@ if (-not $Repo) { $Repo = "ProtonKicker/Avocado" }
 if (-not $Ref) { $Ref = "main" }
 
 $zipUrl = "https://github.com/$Repo/archive/refs/heads/$Ref.zip"
+$venvRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "avocado-installer-venv"
 
 $usePyLauncher = $null -ne (Get-Command py -ErrorAction SilentlyContinue)
 $usePython = $null -ne (Get-Command python -ErrorAction SilentlyContinue)
@@ -20,18 +21,34 @@ if (-not $usePyLauncher -and -not $usePython) {
 
 if ($usePyLauncher) {
   & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" | Out-Null
-  & py -3 -m pip install --user -U pip | Out-Null
-  & py -3 -m pip install --user -U pipx | Out-Null
   Write-Host "installing avocado from: $zipUrl"
-  & py -3 -m pipx install --force $zipUrl
-  & py -3 -m pipx ensurepath | Out-Null
+  if (Get-Command pipx -ErrorAction SilentlyContinue) {
+    pipx install --force $zipUrl
+    pipx ensurepath | Out-Null
+  } else {
+    Write-Host "pipx not found; bootstrapping via venv: $venvRoot"
+    & py -3 -m venv $venvRoot | Out-Null
+    $venvPy = Join-Path $venvRoot "Scripts\python.exe"
+    & $venvPy -m pip install -U pip | Out-Null
+    & $venvPy -m pip install -U pipx | Out-Null
+    & $venvPy -m pipx install --force $zipUrl
+    & $venvPy -m pipx ensurepath | Out-Null
+  }
 } else {
   & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" | Out-Null
-  & python -m pip install --user -U pip | Out-Null
-  & python -m pip install --user -U pipx | Out-Null
   Write-Host "installing avocado from: $zipUrl"
-  & python -m pipx install --force $zipUrl
-  & python -m pipx ensurepath | Out-Null
+  if (Get-Command pipx -ErrorAction SilentlyContinue) {
+    pipx install --force $zipUrl
+    pipx ensurepath | Out-Null
+  } else {
+    Write-Host "pipx not found; bootstrapping via venv: $venvRoot"
+    & python -m venv $venvRoot | Out-Null
+    $venvPy = Join-Path $venvRoot "Scripts\python.exe"
+    & $venvPy -m pip install -U pip | Out-Null
+    & $venvPy -m pip install -U pipx | Out-Null
+    & $venvPy -m pipx install --force $zipUrl
+    & $venvPy -m pipx ensurepath | Out-Null
+  }
 }
 
 if (Get-Command avocado -ErrorAction SilentlyContinue) {

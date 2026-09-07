@@ -5,6 +5,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 AVOCADO_REPO="${AVOCADO_REPO:-ProtonKicker/Avocado}"
 AVOCADO_REF="${AVOCADO_REF:-main}"
 ZIP_URL="https://github.com/${AVOCADO_REPO}/archive/refs/heads/${AVOCADO_REF}.zip"
+INSTALLER_VENV="${AVOCADO_INSTALLER_VENV:-${XDG_DATA_HOME:-$HOME/.local/share}/avocado/installer-venv}"
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "error: ${PYTHON_BIN} not found (need Python 3.10+)"
@@ -17,13 +18,19 @@ fi
   exit 1
 }
 
-"$PYTHON_BIN" -m pip install --user -U pip >/dev/null
-"$PYTHON_BIN" -m pip install --user -U pipx >/dev/null
-
 echo "installing avocado from: ${ZIP_URL}"
-"$PYTHON_BIN" -m pipx install --force "$ZIP_URL"
 
-"$PYTHON_BIN" -m pipx ensurepath >/dev/null 2>&1 || true
+if command -v pipx >/dev/null 2>&1; then
+  pipx install --force "$ZIP_URL"
+  pipx ensurepath >/dev/null 2>&1 || true
+else
+  echo "pipx not found; bootstrapping via venv: ${INSTALLER_VENV}"
+  "$PYTHON_BIN" -m venv "$INSTALLER_VENV"
+  "$INSTALLER_VENV/bin/python" -m pip install -U pip >/dev/null
+  "$INSTALLER_VENV/bin/python" -m pip install -U pipx >/dev/null
+  "$INSTALLER_VENV/bin/pipx" install --force "$ZIP_URL"
+  "$INSTALLER_VENV/bin/pipx" ensurepath >/dev/null 2>&1 || true
+fi
 
 if command -v avocado >/dev/null 2>&1; then
   avocado --help >/dev/null
