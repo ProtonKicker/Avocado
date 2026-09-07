@@ -3,6 +3,7 @@ from __future__ import annotations
 PRELUDE_LINES: list[str] = [
     "import math",
     "from math import *",
+    "import numpy",
     "import numpy as np",
 ]
 
