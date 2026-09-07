@@ -1,0 +1,5 @@
+# IDE / Editor
+.trae/
+
+# Virtual Environment
+.venv/
