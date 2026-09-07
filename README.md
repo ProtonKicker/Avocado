@@ -23,7 +23,7 @@ Terminal-native Python scratchpad: edit a `.py` file on the left and see per-lin
 
 ## Fast install (recommended)
 
-This installs the `avocado` command using `pipx` (isolated env, recommended for CLI tools).
+This downloads the repo as a zip, installs it into a dedicated virtual environment, and drops an `avocado` launcher into your user bin directory (no `pipx`, no system Python changes).
 
 ### macOS / Linux
 
