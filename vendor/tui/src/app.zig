@@ -244,20 +244,28 @@ pub const App = struct {
         const delta_ns = current_time - self.last_frame_ns;
         const delta_ms: u32 = @intCast(@divTrunc(delta_ns, 1_000_000));
 
-        // Process input
-        try self.processInput();
-
-        // Process events
-        self.processEvents();
-
-        // Update animations and timers
-        self.tick_count += 1;
-
-        // Render if needed
+        // Paint the first frame before waiting on stdin. On Windows the
+        // current input read path can block until input arrives, which would
+        // otherwise leave the alternate screen completely blank on startup.
         if (self.needs_redraw) {
             try self.render();
             self.needs_redraw = false;
         }
+
+        // Process events
+        self.processEvents();
+
+        // Render any updates triggered by processed events.
+        if (self.needs_redraw) {
+            try self.render();
+            self.needs_redraw = false;
+        }
+
+        // Process input
+        try self.processInput();
+
+        // Update animations and timers
+        self.tick_count += 1;
 
         // Update FPS counter
         self.fps_counter.update(delta_ms);
@@ -295,9 +303,36 @@ pub const App = struct {
         const bytes_read = reader.interface.readSliceShort(&buf) catch 0;
 
         if (bytes_read > 0) {
-            // Parse input into events
-            if (try self.input_reader.parse(buf[0..bytes_read])) |event| {
-                try self.event_queue.push(event);
+            var offset: usize = 0;
+            while (offset < bytes_read) {
+                var len: usize = 1;
+                const b = buf[offset];
+                if (b == 0x1B) {
+                    if (offset + 1 < bytes_read and buf[offset + 1] == '[') {
+                        len = 2;
+                        while (offset + len < bytes_read) : (len += 1) {
+                            const c = buf[offset + len];
+                            if (c >= 0x40 and c <= 0x7E) {
+                                len += 1;
+                                break;
+                            }
+                        }
+                    } else if (offset + 1 < bytes_read and buf[offset + 1] == 'O') {
+                        len = @min(3, bytes_read - offset);
+                    } else if (offset + 1 < bytes_read and buf[offset + 1] >= 0x20) {
+                        len = 2;
+                    }
+                } else if (b < 0x20) {
+                    len = 1;
+                } else {
+                    len = std.unicode.utf8ByteSequenceLength(b) catch 1;
+                    len = @min(len, bytes_read - offset);
+                }
+
+                if (try self.input_reader.parse(buf[offset .. offset + len])) |event| {
+                    try self.event_queue.push(event);
+                }
+                offset += len;
             }
         }
     }

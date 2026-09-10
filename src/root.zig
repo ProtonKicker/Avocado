@@ -136,6 +136,24 @@ fn valueToNumber(value: Value) EvalError!f64 {
     };
 }
 
+fn floatToI64Checked(value: f64) ?i64 {
+    if (std.math.isNan(value) or std.math.isInf(value)) return null;
+    const truncated = std.math.trunc(value);
+    const max_f: f64 = @floatFromInt(std.math.maxInt(i64));
+    const min_f: f64 = @floatFromInt(std.math.minInt(i64));
+    if (truncated >= max_f or truncated <= min_f) return null;
+    return @intFromFloat(truncated);
+}
+
+fn floatToUsizeChecked(value: f64) ?usize {
+    if (std.math.isNan(value) or std.math.isInf(value)) return null;
+    const truncated = std.math.trunc(value);
+    if (truncated < 0) return null;
+    const max_f: f64 = @floatFromInt(std.math.maxInt(usize));
+    if (truncated >= max_f) return null;
+    return @intFromFloat(truncated);
+}
+
 fn clampWidth(width: i32) u16 {
     return @intCast(@max(@as(i32, min_results_width), @min(@as(i32, max_results_width), width)));
 }
@@ -368,7 +386,7 @@ const Parser = struct {
                 if (self.peek() != ']') return EvalError.ParseError;
                 self.pos += 1;
                 const raw_index = try valueToNumber(index_value);
-                const idx: usize = @intFromFloat(raw_index);
+                const idx = floatToUsizeChecked(raw_index) orelse return EvalError.InvalidIndex;
                 value = try self.indexValue(value, idx);
             } else break;
         }
@@ -493,7 +511,11 @@ const Parser = struct {
         if (std.mem.eql(u8, name, "ln")) return .{ .number = @log(try valueToNumber(args[0])) };
         if (std.mem.eql(u8, name, "log")) return .{ .number = std.math.log10(try valueToNumber(args[0])) };
         if (std.mem.eql(u8, name, "sqrt")) return .{ .number = std.math.sqrt(try valueToNumber(args[0])) };
-        if (std.mem.eql(u8, name, "int")) return .{ .number = @floatFromInt(@as(i64, @intFromFloat(try valueToNumber(args[0])))) };
+        if (std.mem.eql(u8, name, "int")) {
+            const value = try valueToNumber(args[0]);
+            const as_i64 = floatToI64Checked(value) orelse return EvalError.InvalidCall;
+            return .{ .number = @floatFromInt(as_i64) };
+        }
         return EvalError.InvalidCall;
     }
 
@@ -684,7 +706,9 @@ pub fn formatValueAlloc(allocator: std.mem.Allocator, value: Value) ![]u8 {
 fn formatNumberOnlyAlloc(allocator: std.mem.Allocator, n: f64) ![]u8 {
     const rounded = @round(n);
     if (std.math.approxEqAbs(f64, rounded, n, 1e-9)) {
-        return std.fmt.allocPrint(allocator, "{d}", .{@as(i64, @intFromFloat(rounded))});
+        if (floatToI64Checked(rounded)) |as_i64| {
+            return std.fmt.allocPrint(allocator, "{d}", .{as_i64});
+        }
     }
     return std.fmt.allocPrint(allocator, "{d}", .{n});
 }
@@ -826,4 +850,19 @@ test "python lists and indexing still work" {
 
     try std.testing.expectEqualStrings("[1, 2, 3]", out.lines.items[0]);
     try std.testing.expectEqualStrings("2", out.lines.items[1]);
+}
+
+test "invalid indices do not trap" {
+    const allocator = std.testing.allocator;
+    var out = try evaluateSourceLinewiseAlloc(allocator, "items = [1, 2, 3]\nitems[-1]\nitems[18446744073709551616]", false);
+    defer out.deinit();
+    try std.testing.expect(std.mem.startsWith(u8, out.lines.items[1], "InvalidIndex"));
+    try std.testing.expect(std.mem.startsWith(u8, out.lines.items[2], "InvalidIndex"));
+}
+
+test "int out of range does not trap" {
+    const allocator = std.testing.allocator;
+    var out = try evaluateSourceLinewiseAlloc(allocator, "int(1/0)", true);
+    defer out.deinit();
+    try std.testing.expect(std.mem.startsWith(u8, out.lines.items[0], "InvalidCall"));
 }

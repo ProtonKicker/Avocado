@@ -1,84 +1,95 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+ZIG_BIN="${ZIG_BIN:-$(command -v zig || true)}"
 AVOCADO_REPO="${AVOCADO_REPO:-ProtonKicker/Avocado}"
 AVOCADO_REF="${AVOCADO_REF:-main}"
 ZIP_URL="${AVOCADO_ZIP_URL:-https://codeload.github.com/${AVOCADO_REPO}/zip/refs/heads/${AVOCADO_REF}}"
 AVOCADO_HOME="${AVOCADO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/avocado}"
-VENV_DIR="${AVOCADO_VENV_DIR:-$AVOCADO_HOME/venv}"
+REPO_DIR="${AVOCADO_REPO_DIR:-$AVOCADO_HOME/repo}"
+INSTALL_DIR="${AVOCADO_INSTALL_DIR:-$AVOCADO_HOME/install}"
 BIN_DIR="${AVOCADO_BIN_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
 LAUNCHER_PATH="${AVOCADO_LAUNCHER_PATH:-$BIN_DIR/avocado}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="${AVOCADO_SOURCE_DIR:-}"
 
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  echo "error: ${PYTHON_BIN} not found (need Python 3.10+)"
+if [[ -z "${SOURCE_DIR}" && -f "${SCRIPT_DIR}/build.zig" && -d "${SCRIPT_DIR}/src" ]]; then
+  SOURCE_DIR="${SCRIPT_DIR}"
+fi
+
+if [[ -z "${ZIG_BIN}" ]]; then
+  echo "error: zig not found (need Zig 0.16+)"
   exit 1
 fi
 
-"$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1 || {
-  echo "error: need Python 3.10+"
-  "$PYTHON_BIN" -V || true
+if ! command -v curl >/dev/null 2>&1; then
+  echo "error: curl not found"
   exit 1
-}
+fi
 
-work_dir="$(mktemp -d)"
-zip_path="$work_dir/avocado.zip"
-extract_dir="$work_dir/extract"
-mkdir -p "$extract_dir"
-cleanup() { rm -rf "$work_dir"; }
+if ! command -v unzip >/dev/null 2>&1; then
+  echo "error: unzip not found"
+  exit 1
+fi
+
+work_dir=""
+cleanup() {
+  if [[ -n "${work_dir}" && -d "${work_dir}" ]]; then
+    rm -rf "$work_dir"
+  fi
+}
 trap cleanup EXIT
 
-echo "downloading: ${ZIP_URL}"
-"$PYTHON_BIN" - <<PY
-from __future__ import annotations
-import pathlib
-import urllib.request
+mkdir -p "$AVOCADO_HOME" "$BIN_DIR"
+rm -rf "$INSTALL_DIR"
 
-url = ${ZIP_URL@Q}
-dst = pathlib.Path(${zip_path@Q})
-dst.parent.mkdir(parents=True, exist_ok=True)
-urllib.request.urlretrieve(url, dst)
-print(f"saved: {dst}")
-PY
+if [[ -n "${SOURCE_DIR}" ]]; then
+  echo "installing from local source: ${SOURCE_DIR}"
+  repo_build_dir="${SOURCE_DIR}"
+else
+  rm -rf "$REPO_DIR"
+  work_dir="$(mktemp -d)"
+  zip_path="$work_dir/avocado.zip"
+  extract_dir="$work_dir/extract"
+  mkdir -p "$extract_dir"
 
-"$PYTHON_BIN" - <<PY
-from __future__ import annotations
-import pathlib
-import zipfile
+  echo "downloading: ${ZIP_URL}"
+  curl -fsSL "$ZIP_URL" -o "$zip_path"
+  unzip -q "$zip_path" -d "$extract_dir"
 
-zip_path = pathlib.Path(${zip_path@Q})
-extract_dir = pathlib.Path(${extract_dir@Q})
-extract_dir.mkdir(parents=True, exist_ok=True)
-with zipfile.ZipFile(zip_path) as zf:
-    zf.extractall(extract_dir)
-print(f"extracted: {extract_dir}")
-PY
+  build_path="$(find "$extract_dir" -maxdepth 3 -name build.zig -print -quit)"
+  if [[ -z "${build_path}" ]]; then
+    echo "error: build.zig not found in downloaded zip"
+    exit 1
+  fi
+  project_dir="$(dirname "$build_path")"
+  mv "$project_dir" "$REPO_DIR"
+  repo_build_dir="$REPO_DIR"
+fi
 
-pyproject_path="$(find "$extract_dir" -maxdepth 3 -name pyproject.toml -print -quit)"
-if [[ -z "${pyproject_path}" ]]; then
-  echo "error: pyproject.toml not found in downloaded zip"
+(
+  cd "$repo_build_dir"
+  "$ZIG_BIN" build -Doptimize=ReleaseSafe --prefix "$INSTALL_DIR"
+)
+
+installed_exe="$INSTALL_DIR/bin/avocado"
+if [[ ! -x "$installed_exe" ]]; then
+  echo "error: installed executable not found at ${installed_exe}"
   exit 1
 fi
-project_dir="$(dirname "$pyproject_path")"
 
-mkdir -p "$AVOCADO_HOME" "$BIN_DIR"
-"$PYTHON_BIN" -m venv "$VENV_DIR"
-"$VENV_DIR/bin/python" -m pip install -U pip >/dev/null
-"$VENV_DIR/bin/python" -m pip install -U "$project_dir" >/dev/null
-
-cat >"$LAUNCHER_PATH" <<'SH'
+cat >"$LAUNCHER_PATH" <<SH
 #!/usr/bin/env bash
 set -euo pipefail
-VENV_DIR="${AVOCADO_VENV_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/avocado/venv}"
-exec "$VENV_DIR/bin/python" -B -m avocado_tui.__main__ "$@"
+exec "$installed_exe" "\$@"
 SH
 chmod +x "$LAUNCHER_PATH"
 
 if command -v avocado >/dev/null 2>&1; then
-  avocado --help >/dev/null
   echo "ok: avocado is installed"
+  echo "run: avocado"
   exit 0
 fi
 
 echo "installed, but 'avocado' is not on PATH in this shell"
-echo "add ${BIN_DIR} to PATH, open a new terminal, then run: avocado --help"
+echo "add ${BIN_DIR} to PATH, open a new terminal, then run: avocado"

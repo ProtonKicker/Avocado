@@ -33,16 +33,19 @@
     // internet connectivity.
     .dependencies = .{
         .tui = .{
-            .url = "git+https://github.com/muhammad-fiaz/tui.zig.git#cce16fb4903ddf36177811777f41b0d0f85d58d0",
-            .hash = "tui-0.0.2-TMwxp7eMBgAMjEtb69TqlnoTVEhQW1vXuKrp-oY6XIRe",
+            .path = "vendor/tui",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "vendor",
+        "examples",
+        "README.md",
+        "install.ps1",
+        "install.sh",
+        "avocado.ps1",
+        "avocado.sh",
     },
 }

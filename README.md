@@ -1,32 +1,29 @@
 # Avocado's Constant
 
-Terminal-native math notebook: edit a `.txt` document on the left and see per-line results on the right. The evaluator is math-first, while still accepting Python and MATLAB-like lines in the same document.
-
-The app backend is still Python-based: the TUI runs on `Textual`, the runtime uses Python plus `numpy`, and the mixed-grammar evaluator adds a lightweight MATLAB-like syntax layer on top of the Python engine.
+Avocado is a terminal-native math notebook written in Zig. Edit a `.txt` document on the left and see per-line results on the right.
 
 ## Features
 
-- Two-line banner with `Avocado's Constant` on the left and the current document path on the right.
-- Click-to-copy banner path behavior:
-  - click the filename to copy just the filename,
-  - click the directory to copy the full path.
-- Mouse-draggable vertical divider; width is stored in `~/.avocado/config.json`.
-- `.txt`-only save workflow in the UI for mixed math notes instead of `.py` scratch files.
-- Per-line evaluation with captured `stdout` / `stderr`.
+- Two-line banner with the app name on the left and the current document path on the right.
+- Mouse-draggable results divider with per-file width saved in `~/.avocado/config.json`.
+- Full-width save and new-file prompt with `.txt` normalization.
+- Relative save paths resolved from the directory where Avocado was launched.
+- Line-by-line evaluator with practical math-first syntax.
 - Mixed grammar support in one document:
-  - natural math such as `sin(pi/2)`, `e^x`, `ln(10)`,
-  - MATLAB-like ranges such as `1:1:10`,
-  - MATLAB-style matrices such as `[1 2 3; 4 5 6]`,
-  - Python assignments and expressions when useful.
+  - natural math such as `sin(pi / 2)`, `e^x`, `ln(10)`
+  - MATLAB-like ranges such as `1:1:10`
+  - MATLAB-style matrices such as `[1 2 3; 4 5 6]`
+  - Python-style assignments, lists, and indexing when useful
 
 ## Requirements
 
-- Python 3.10+
+- Zig 0.16+
 - A terminal with mouse support if you want to drag the divider
+- On macOS / Linux, the install script also expects `curl` and `unzip`
 
 ## Fast install
 
-This downloads the repo as a zip, installs it into a dedicated virtual environment, and drops an `avocado` launcher into your user bin directory.
+The install scripts download the repo, build the Zig executable, and place an `avocado` launcher in your user bin directory.
 
 ### macOS / Linux
 
@@ -40,38 +37,24 @@ curl -fsSL https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.s
 irm https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.ps1 | iex
 ```
 
-## Editable install
+## Local development
 
-### macOS / Linux
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e .
-```
-
-### Windows (PowerShell)
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e .
-```
-
-## Run
-
-### With the `avocado` command
+### Build tests
 
 ```bash
-avocado examples/demo.txt
+zig build test
 ```
 
-### Module entrypoint
+### Build app
 
 ```bash
-python -m avocado_tui.__main__ examples/demo.txt
+zig build
+```
+
+### Run app
+
+```bash
+zig build run -- examples/demo.txt
 ```
 
 ### Wrapper scripts
@@ -98,8 +81,6 @@ Windows (PowerShell):
 
 ## Example document
 
-The bundled demo document shows a mixed notebook:
-
 ```text
 x = 3
 sin(pi / 2)
@@ -117,6 +98,6 @@ e^x
 
 ## Notes
 
-- Evaluation is line-by-line, so multi-line Python blocks such as `def`, `for`, or `if` with indented bodies still do not behave like a full Python file.
-- By default, evaluation stops at the first error and later lines show `Skipped`.
-- Phase 1 intentionally focuses on practical math aliases, ranges, and matrices instead of full LaTeX or full MATLAB compatibility.
+- Evaluation is line-by-line, so multi-line Python blocks such as `def`, `for`, or `if` with indented bodies do not behave like a full Python file.
+- After the first evaluation error, later lines show `Skipped`.
+- The current Zig rewrite keeps the existing minimalist notebook workflow, not full Python or full MATLAB compatibility.

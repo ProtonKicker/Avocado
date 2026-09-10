@@ -90,7 +90,9 @@ const AvocadoShell = struct {
             .prompt_input = prompt_input,
         };
         shell.requested_results_width = shell.loadResultsWidth();
-        try shell.evaluate();
+        shell.evaluate() catch {
+            shell.setSingleResultMessage("Startup evaluation failed") catch {};
+        };
         return shell;
     }
 
