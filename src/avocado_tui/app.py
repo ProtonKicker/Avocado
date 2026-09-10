@@ -384,13 +384,13 @@ class AvocadoApp(App):
 
     def action_new_file(self) -> None:
         base_dir = self._file_path.parent if self._file_path else self._launch_dir
-        suggested = str(base_dir / "untitled.py")
+        suggested = str(base_dir / "untitled.txt")
         self.push_screen(
             PathPromptScreen(
                 suggested,
-                title="Enter file name and path",
-                placeholder="path\\to\\untitled.py",
-                path_help_text=f"Relative paths start from {self._launch_dir}",
+                title="Enter document name and path",
+                placeholder="path\\to\\untitled.txt",
+                path_help_text=f"Relative paths start from {self._launch_dir} and save as .txt",
                 submit_text="Enter=create",
                 cancel_text="Esc=cancel",
             ),
@@ -401,7 +401,7 @@ class AvocadoApp(App):
         if not path:
             return
 
-        self._file_path = self._resolve_user_path(path)
+        self._file_path = self._resolve_user_path(self._ensure_txt_path(path))
         editor = self.query_one("#editor", TextArea)
         editor.text = ""
         editor.focus()
@@ -409,13 +409,13 @@ class AvocadoApp(App):
         self._evaluate_now()
 
     def action_save(self) -> None:
-        suggested = str(self._file_path or (self._launch_dir / "untitled.py"))
+        suggested = str(self._file_path or (self._launch_dir / "untitled.txt"))
         self.push_screen(
             PathPromptScreen(
                 suggested,
-                title="Enter file name and path",
-                placeholder="path\\to\\file.py",
-                path_help_text=f"Relative paths start from {self._launch_dir}",
+                title="Enter document name and path",
+                placeholder="path\\to\\document.txt",
+                path_help_text=f"Relative paths start from {self._launch_dir} and save as .txt",
                 submit_text="Enter=save",
                 cancel_text="Esc=cancel",
             ),
@@ -425,11 +425,19 @@ class AvocadoApp(App):
     def _save_as_callback(self, path: Optional[str]) -> None:
         if not path:
             return
-        self._file_path = self._resolve_user_path(path)
+        self._file_path = self._resolve_user_path(self._ensure_txt_path(path))
         self._update_banner()
         editor = self.query_one("#editor", TextArea)
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
         self._file_path.write_text(editor.text, encoding="utf-8")
+
+    def _ensure_txt_path(self, raw_path: str) -> str:
+        path = Path(raw_path.strip()).expanduser()
+        if path.suffix.lower() == ".txt":
+            return str(path)
+        if path.suffix:
+            return str(path.with_suffix(".txt"))
+        return str(path.with_name(path.name + ".txt"))
 
     def _resolve_user_path(self, raw_path: str) -> Path:
         path = Path(raw_path.strip()).expanduser()
@@ -508,7 +516,7 @@ class AvocadoApp(App):
     def _update_banner(self) -> None:
         banner = self.query_one("#banner", Static)
         content_w = max(1, banner.content_region.width, self.size.width - 2)
-        app_name = "Avocado"
+        app_name = "Avocado's Constant"
         app_name_w = cell_len(app_name)
 
         first_line = Text(no_wrap=True)

@@ -6,6 +6,8 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
+from .math_engine import MathSyntaxError, evaluate_math_line
+
 
 @dataclass(frozen=True)
 class EvalOutput:
@@ -40,6 +42,81 @@ def _assigned_names(stmt: ast.stmt) -> list[str]:
     return []
 
 
+_PYTHON_STATEMENT_PREFIXES = (
+    "import ",
+    "from ",
+    "for ",
+    "if ",
+    "while ",
+    "with ",
+    "try",
+    "def ",
+    "class ",
+    "return",
+    "pass",
+    "raise ",
+    "assert ",
+    "del ",
+    "global ",
+    "nonlocal ",
+    "yield ",
+)
+
+
+def _is_python_statement_candidate(line: str) -> bool:
+    stripped = line.lstrip()
+    return any(stripped.startswith(prefix) for prefix in _PYTHON_STATEMENT_PREFIXES)
+
+
+def _format_value(value: Any) -> str:
+    return repr(value).replace("\n", "\\n")
+
+
+def _append_python_output(
+    outputs: list[str], line: str, ns: dict[str, Any], stdout_io: io.StringIO, stderr_io: io.StringIO
+) -> None:
+    mod = ast.parse(line, mode="exec")
+    if len(mod.body) != 1:
+        code = compile(mod, "<avocado>", "exec")
+        exec(code, ns, ns)
+        outputs.append(
+            _combine_stream_and_value(
+                _squash_stream_text(stdout_io.getvalue()),
+                _squash_stream_text(stderr_io.getvalue()),
+            )
+        )
+        return
+
+    stmt = mod.body[0]
+    if isinstance(stmt, ast.Expr):
+        expr_code = compile(ast.Expression(stmt.value), "<avocado>", "eval")
+        value = eval(expr_code, ns, ns)
+
+        stdout_text = _squash_stream_text(stdout_io.getvalue())
+        stderr_text = _squash_stream_text(stderr_io.getvalue())
+        value_text = _format_value(value)
+        if value is None and stdout_text:
+            outputs.append(_combine_stream_and_value(stdout_text, stderr_text))
+        else:
+            outputs.append(
+                _combine_stream_and_value(stdout_text, stderr_text, value_text)
+            )
+        return
+
+    assigned = _assigned_names(stmt)
+    code = compile(mod, "<avocado>", "exec")
+    exec(code, ns, ns)
+
+    stdout_text = _squash_stream_text(stdout_io.getvalue())
+    stderr_text = _squash_stream_text(stderr_io.getvalue())
+    if len(assigned) == 1 and assigned[0] in ns:
+        outputs.append(
+            _combine_stream_and_value(stdout_text, stderr_text, _format_value(ns[assigned[0]]))
+        )
+    else:
+        outputs.append(_combine_stream_and_value(stdout_text, stderr_text))
+
+
 def evaluate_source_linewise(source: str, *, stop_on_error: bool = True) -> EvalOutput:
     ns: dict[str, Any] = {}
     outputs: list[str] = []
@@ -61,47 +138,39 @@ def evaluate_source_linewise(source: str, *, stop_on_error: bool = True) -> Eval
             with contextlib.redirect_stdout(stdout_io), contextlib.redirect_stderr(
                 stderr_io
             ):
-                mod = ast.parse(line, mode="exec")
-                if len(mod.body) != 1:
-                    code = compile(mod, "<avocado>", "exec")
-                    exec(code, ns, ns)
-                    outputs.append(
-                        _combine_stream_and_value(
-                            _squash_stream_text(stdout_io.getvalue()),
-                            _squash_stream_text(stderr_io.getvalue()),
-                        )
-                    )
-                    continue
-
-                stmt = mod.body[0]
-                if isinstance(stmt, ast.Expr):
-                    expr_code = compile(ast.Expression(stmt.value), "<avocado>", "eval")
-                    value = eval(expr_code, ns, ns)
-
-                    stdout_text = _squash_stream_text(stdout_io.getvalue())
-                    stderr_text = _squash_stream_text(stderr_io.getvalue())
-                    value_text = repr(value).replace("\n", "\\n")
-                    if value is None and stdout_text:
-                        outputs.append(_combine_stream_and_value(stdout_text, stderr_text))
+                if not _is_python_statement_candidate(line):
+                    try:
+                        math_result = evaluate_math_line(line, ns)
+                    except (MathSyntaxError, SyntaxError):
+                        _append_python_output(outputs, line, ns, stdout_io, stderr_io)
                     else:
-                        outputs.append(
-                            _combine_stream_and_value(stdout_text, stderr_text, value_text)
-                        )
-                    continue
-
-                assigned = _assigned_names(stmt)
-                code = compile(mod, "<avocado>", "exec")
-                exec(code, ns, ns)
-
-                stdout_text = _squash_stream_text(stdout_io.getvalue())
-                stderr_text = _squash_stream_text(stderr_io.getvalue())
-                if len(assigned) == 1 and assigned[0] in ns:
-                    value_text = repr(ns[assigned[0]]).replace("\n", "\\n")
-                    outputs.append(
-                        _combine_stream_and_value(stdout_text, stderr_text, value_text)
-                    )
+                        stdout_text = _squash_stream_text(stdout_io.getvalue())
+                        stderr_text = _squash_stream_text(stderr_io.getvalue())
+                        if len(math_result.assigned_names) == 1:
+                            assigned_name = math_result.assigned_names[0]
+                            outputs.append(
+                                _combine_stream_and_value(
+                                    stdout_text,
+                                    stderr_text,
+                                    _format_value(ns[assigned_name]),
+                                )
+                            )
+                        elif math_result.value is None and stdout_text:
+                            outputs.append(
+                                _combine_stream_and_value(stdout_text, stderr_text)
+                            )
+                        else:
+                            outputs.append(
+                                _combine_stream_and_value(
+                                    stdout_text,
+                                    stderr_text,
+                                    _format_value(math_result.value),
+                                )
+                            )
+                        continue
                 else:
-                    outputs.append(_combine_stream_and_value(stdout_text, stderr_text))
+                    _append_python_output(outputs, line, ns, stdout_io, stderr_io)
+                    continue
         except Exception as e:
             stdout_text = _squash_stream_text(stdout_io.getvalue())
             stderr_text = _squash_stream_text(stderr_io.getvalue())

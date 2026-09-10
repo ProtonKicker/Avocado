@@ -1,29 +1,32 @@
-# Avocado TUI
+# Avocado's Constant
 
-Terminal-native Python scratchpad: edit a `.py` file on the left and see per-line results on the right. Results update automatically as you type.
+Terminal-native math notebook: edit a `.txt` document on the left and see per-line results on the right. The evaluator is math-first, while still accepting Python and MATLAB-like lines in the same document.
+
+The app backend is still Python-based: the TUI runs on `Textual`, the runtime uses Python plus `numpy`, and the mixed-grammar evaluator adds a lightweight MATLAB-like syntax layer on top of the Python engine.
 
 ## Features
 
-- Two-line banner: `Avocado` on the left, file path on the right (filename highlighted). When the window is narrow, the directory is hidden to keep the filename visible on the first line.
-- Click-to-copy on the banner:
-  - Click the filename to copy just the filename
-  - Click the directory part to copy the full path
-- Mouse-draggable vertical divider to resize the results panel; the width is saved in `~/.avocado/config.json` per file path.
-- Per-line evaluator with captured `stdout`/`stderr`:
-  - `print(...)` output shows up in the results panel
-  - Multi-line output is flattened using `\n` so results stay aligned with editor lines
-- Prelude imports before your code:
-  - `import math` and `from math import *`
-  - `import numpy as np`
+- Two-line banner with `Avocado's Constant` on the left and the current document path on the right.
+- Click-to-copy banner path behavior:
+  - click the filename to copy just the filename,
+  - click the directory to copy the full path.
+- Mouse-draggable vertical divider; width is stored in `~/.avocado/config.json`.
+- `.txt`-only save workflow in the UI for mixed math notes instead of `.py` scratch files.
+- Per-line evaluation with captured `stdout` / `stderr`.
+- Mixed grammar support in one document:
+  - natural math such as `sin(pi/2)`, `e^x`, `ln(10)`,
+  - MATLAB-like ranges such as `1:1:10`,
+  - MATLAB-style matrices such as `[1 2 3; 4 5 6]`,
+  - Python assignments and expressions when useful.
 
 ## Requirements
 
 - Python 3.10+
-- A terminal that supports mouse events (recommended if you want to drag the divider)
+- A terminal with mouse support if you want to drag the divider
 
-## Fast install (recommended)
+## Fast install
 
-This downloads the repo as a zip, installs it into a dedicated virtual environment, and drops an `avocado` launcher into your user bin directory (no `pipx`, no system Python changes).
+This downloads the repo as a zip, installs it into a dedicated virtual environment, and drops an `avocado` launcher into your user bin directory.
 
 ### macOS / Linux
 
@@ -31,71 +34,13 @@ This downloads the repo as a zip, installs it into a dedicated virtual environme
 curl -fsSL https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.sh | bash
 ```
 
-If `avocado` isn’t found, open a new terminal and make sure `~/.local/bin` is on your PATH.
-
 ### Windows (PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/ProtonKicker/Avocado/main/install.ps1 | iex
 ```
 
-If `avocado` isn’t found, open a new terminal window and try again.
-
-## Fast install (clone, install, delete)
-
-This installs the `avocado` command into your user Python environment, then you can delete the cloned folder.
-
-On some systems this may fail with `externally-managed-environment` (PEP 668). If that happens, use the `pipx` install above.
-
-### macOS / Linux
-
-```bash
-git clone https://github.com/ProtonKicker/Avocado.git
-cd Avocado
-python3 -m pip install --user -U pip
-python3 -m pip install --user .
-cd ..
-rm -rf Avocado
-
-avocado --help
-```
-
-### Windows (PowerShell)
-
-```powershell
-git clone https://github.com/ProtonKicker/Avocado.git
-cd Avocado
-py -3 -m pip install --user -U pip
-py -3 -m pip install --user .
-cd ..
-Remove-Item -Recurse -Force .\Avocado
-
-avocado --help
-```
-
-## Quickstart (recommended, no venv activation)
-
-The wrapper scripts will:
-
-- Create a local `.venv` if missing
-- Install this repo in editable mode into that `.venv`
-- Launch Avocado using that `.venv`
-
-### macOS / Linux
-
-```bash
-./avocado.sh examples/demo.py
-```
-
-### Windows (PowerShell)
-
-```powershell
-.\avocado.ps1 examples\demo.py
-```
-
-## Install (editable / dev)
-
-This is the most flexible way to work on the code locally.
+## Editable install
 
 ### macOS / Linux
 
@@ -117,100 +62,61 @@ python -m pip install -e .
 
 ## Run
 
-There are a few ways to run Avocado because Python environments differ across machines.
+### With the `avocado` command
 
-### Run (when your venv is active)
+```bash
+avocado examples/demo.txt
+```
 
-If you installed with `pip install -e .` and your virtual environment is active, use the `avocado` command (recommended).
+### Module entrypoint
+
+```bash
+python -m avocado_tui.__main__ examples/demo.txt
+```
+
+### Wrapper scripts
 
 macOS / Linux:
 
 ```bash
-avocado examples/demo.py
+./avocado.sh examples/demo.txt
 ```
 
 Windows (PowerShell):
 
 ```powershell
-avocado examples\demo.py
+.\avocado.ps1 examples\demo.txt
 ```
 
-### Run (module entrypoint)
+## File behavior
 
-If you prefer not to rely on the console script, you can run the module directly:
+- Passing a missing path creates a new document.
+- Missing extensions are normalized to `.txt` for new documents.
+- Saving from the UI always writes `.txt`.
+- Missing parent directories are created automatically.
+- Relative paths resolve from the directory where `avocado` was launched.
 
-macOS / Linux:
+## Example document
 
-```bash
-python -m avocado_tui.__main__ examples/demo.py
-```
+The bundled demo document shows a mixed notebook:
 
-Windows (PowerShell):
-
-```powershell
-python -m avocado_tui.__main__ examples\demo.py
-```
-
-### Run (no activation)
-
-If you don’t want to activate a virtual environment, use the wrapper script (`avocado.sh` / `avocado.ps1`).
-
-macOS / Linux:
-
-```bash
-./avocado.sh examples/demo.py
-```
-
-Windows (PowerShell):
-
-```powershell
-.\avocado.ps1 examples\demo.py
-```
-
-## File Paths
-
-- You can pass a file path as the first argument (e.g. `avocado demo.py`).
-- If the file (or its parent directories) don’t exist yet, Avocado will create them.
-- If you pass a directory, Avocado will error.
-
-## Uninstall
-
-This section has 2 steps:
-
-1) Uninstall the package from your current Python environment (run once).
-
-```bash
-python -m pip uninstall -y avocado-tui
-```
-
-2) Optionally delete the local virtual environment folder (choose ONE command depending on your shell/OS).
-
-macOS / Linux:
-
-```bash
-rm -rf .venv
-```
-
-Windows (PowerShell):
-
-```powershell
-Remove-Item -Recurse -Force .venv
+```text
+x = 3
+sin(pi / 2)
+1:1:5
+[1 2 3; 4 5 6]
+e^x
 ```
 
 ## Keys
 
 - Ctrl+Q: quit
-- Ctrl+N: new file (prompts for a path)
-- Ctrl+S: save
+- Ctrl+N: new document
+- Ctrl+S: save document
 - Ctrl+R: toggle results panel
-
-## Troubleshooting
-
-- Dragging the divider doesn’t work: try a terminal with better mouse support (Windows Terminal, iTerm2, GNOME Terminal, Kitty).
-- Installed new Python packages but Avocado can’t import them: restart Avocado so it picks up the updated `.venv`.
-- `avocado` command not found: make sure your virtual environment is active and you installed with `python -m pip install -e .`.
 
 ## Notes
 
-- Evaluation is line-by-line, so multi-line Python blocks (e.g. `def`, `for`, `if` with indented bodies) won’t behave like a normal Python file execution.
+- Evaluation is line-by-line, so multi-line Python blocks such as `def`, `for`, or `if` with indented bodies still do not behave like a full Python file.
 - By default, evaluation stops at the first error and later lines show `Skipped`.
+- Phase 1 intentionally focuses on practical math aliases, ranges, and matrices instead of full LaTeX or full MATLAB compatibility.
