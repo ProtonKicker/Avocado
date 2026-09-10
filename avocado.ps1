@@ -1,18 +1,30 @@
 param(
-  [Parameter(Position=0)]
-  [string]$Path
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Args
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$venvPython = Join-Path $repoRoot ".venv\\Scripts\\python.exe"
+$zigCmd = Get-Command zig -ErrorAction SilentlyContinue
 
-if (-not (Test-Path $venvPython)) {
-  python -m venv (Join-Path $repoRoot ".venv")
-  & $venvPython -m pip install -U pip
-  & $venvPython -m pip install -e $repoRoot
+if ($zigCmd) {
+  $zigExe = $zigCmd.Source
+} else {
+  $zigPackageRoot = Join-Path $env:LOCALAPPDATA "Microsoft\\WinGet\\Packages\\zig.zig_Microsoft.Winget.Source_8wekyb3d8bbwe"
+  $zigExe = Get-ChildItem -Path $zigPackageRoot -Recurse -Filter "zig.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -ExpandProperty FullName -First 1
 }
 
-$env:PYTHONDONTWRITEBYTECODE = "1"
-& $venvPython -B -m avocado_tui.__main__ $Path
+if (-not $zigExe) {
+  throw "zig.exe not found. Install Zig 0.16+ or add it to PATH."
+}
+
+Push-Location $repoRoot
+try {
+  & $zigExe build run -- @Args
+  exit $LASTEXITCODE
+} finally {
+  Pop-Location
+}

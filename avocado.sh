@@ -2,14 +2,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PY="$REPO_ROOT/.venv/bin/python"
+ZIG_BIN="${ZIG_BIN:-$(command -v zig || true)}"
 
-if [[ ! -x "$VENV_PY" ]]; then
-  python3 -m venv "$REPO_ROOT/.venv"
-  "$VENV_PY" -m pip install -U pip
-  "$VENV_PY" -m pip install -e "$REPO_ROOT"
+if [[ -z "${ZIG_BIN}" ]]; then
+  echo "error: zig not found (need Zig 0.16+)" >&2
+  exit 1
 fi
 
-export PYTHONDONTWRITEBYTECODE=1
-"$VENV_PY" -B -m avocado_tui.__main__ "${1:-}"
-
+cd "$REPO_ROOT"
+exec "$ZIG_BIN" build run -- "$@"
