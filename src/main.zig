@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const tui = @import("tui");
 const Avocado = @import("Avocado");
 
@@ -12,6 +13,7 @@ const MouseEvent = tui.events.MouseEvent;
 const MouseKind = tui.events.MouseKind;
 const MouseButton = tui.events.MouseButton;
 const RenderContext = tui.RenderContext;
+const Screen = tui.screen.Screen;
 const Style = tui.style.Style;
 const Color = tui.style.Color;
 const SubScreen = tui.widget.SubScreen;
@@ -105,7 +107,7 @@ const AvocadoShell = struct {
         if (self.config_path) |path| self.allocator.free(path);
     }
 
-    fn render(self: *AvocadoShell, ctx: *RenderContext) void {
+    pub fn render(self: *AvocadoShell, ctx: *RenderContext) void {
         var screen = ctx.getSubScreen();
         screen.setStyle(baseStyle());
         screen.clear();
@@ -123,7 +125,7 @@ const AvocadoShell = struct {
         }
     }
 
-    fn handleEvent(self: *AvocadoShell, event: Event) EventResult {
+    pub fn handleEvent(self: *AvocadoShell, event: Event) EventResult {
         switch (event) {
             .resize => {
                 self.evaluate() catch {
@@ -603,7 +605,7 @@ const AvocadoShell = struct {
                             var it = value.object.iterator();
                             while (it.next()) |entry| {
                                 if (jsonValueToWidth(entry.value_ptr.*)) |width| {
-                                    try putOwnedWidth(&widths, self.allocator, entry.key_ptr.*, width);
+                                    try putOwnedWidth(&widths, self.allocator, entry.key_ptr.*, clampConfiguredWidth(width));
                                 }
                             }
                         }
@@ -669,6 +671,35 @@ pub fn main(init: std.process.Init) !void {
     var file_path: ?[]u8 = null;
     defer if (file_path) |path| allocator.free(path);
 
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--self-test")) {
+        try runSelfTest(io, allocator, launch_dir, config_path);
+        return;
+    }
+
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--dump-frame")) {
+        const initial_text = try allocator.dupe(u8, "");
+        defer allocator.free(initial_text);
+
+        var shell = try AvocadoShell.init(allocator, io, launch_dir, config_path, null, initial_text);
+        defer shell.deinit();
+
+        var screen = try Screen.init(allocator, 80, 24);
+        defer screen.deinit();
+
+        var theme = tui.Theme.default_theme;
+        var ctx = RenderContext{
+            .screen = &screen,
+            .theme = &theme,
+            .bounds = .{ .x = 0, .y = 0, .width = screen.width, .height = screen.height },
+            .clip = .{ .x = 0, .y = 0, .width = screen.width, .height = screen.height },
+            .focused_id = null,
+            .time_ns = 0,
+        };
+        shell.render(&ctx);
+        try dumpScreenPlain(io, allocator, &screen);
+        return;
+    }
+
     if (args.len > 2) {
         std.debug.print("usage: avocado [path]\n", .{});
         return error.InvalidArgument;
@@ -688,13 +719,107 @@ pub fn main(init: std.process.Init) !void {
     var shell = try AvocadoShell.init(allocator, io, launch_dir, config_path, file_path, initial_text);
     defer shell.deinit();
 
+    const is_windows = builtin.os.tag == .windows;
     var app = try tui.App.initWithAllocator(allocator, .{
-        .enable_mouse = true,
+        .alternate_screen = !is_windows,
+        .hide_cursor = !is_windows,
+        .enable_mouse = !is_windows,
+        .enable_paste = !is_windows,
+        .enable_focus = !is_windows,
     });
     defer app.deinit();
 
     try app.setRoot(&shell);
     try app.run();
+}
+
+fn runSelfTest(io: std.Io, allocator: std.mem.Allocator, launch_dir: []const u8, config_path: ?[]const u8) !void {
+    const stdout = std.Io.File.stdout();
+
+    const initial_text = try allocator.dupe(u8, "");
+    defer allocator.free(initial_text);
+
+    var shell = try AvocadoShell.init(allocator, io, launch_dir, config_path, null, initial_text);
+    defer shell.deinit();
+
+    var screen = try Screen.init(allocator, 80, 24);
+    defer screen.deinit();
+
+    var theme = tui.Theme.default_theme;
+    var ctx = RenderContext{
+        .screen = &screen,
+        .theme = &theme,
+        .bounds = .{ .x = 0, .y = 0, .width = screen.width, .height = screen.height },
+        .clip = .{ .x = 0, .y = 0, .width = screen.width, .height = screen.height },
+        .focused_id = null,
+        .time_ns = 0,
+    };
+    shell.render(&ctx);
+
+    if (!screenHasInk(&screen)) return error.EmptyFrame;
+
+    if (builtin.os.tag == .windows) {
+        const kernel32 = struct {
+            extern "kernel32" fn GetConsoleMode(h: std.os.windows.HANDLE, mode: *u32) callconv(.winapi) std.os.windows.BOOL;
+            extern "kernel32" fn SetConsoleMode(h: std.os.windows.HANDLE, mode: u32) callconv(.winapi) std.os.windows.BOOL;
+        };
+
+        var out_mode: u32 = 0;
+        if (kernel32.GetConsoleMode(stdout.handle, &out_mode) == .FALSE) {
+            try stdout.writeStreamingAll(io, "SELFTEST_OK_NO_CONSOLE\n");
+            return;
+        }
+
+        const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+        if (kernel32.SetConsoleMode(stdout.handle, out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) == .FALSE) return error.VTNotAvailable;
+        _ = kernel32.SetConsoleMode(stdout.handle, out_mode);
+    }
+
+    try stdout.writeStreamingAll(io, "SELFTEST_OK\n");
+}
+
+fn screenHasInk(screen: *const Screen) bool {
+    for (0..screen.height) |y| {
+        for (0..screen.width) |x| {
+            const cell = screen.getCell(@intCast(x), @intCast(y)) orelse continue;
+            if (cell.width == 0) continue;
+            switch (cell.content) {
+                .codepoint => |cp| if (cp != ' ') return true,
+                .grapheme => |g| if (!(g.len == 1 and g[0] == ' ')) return true,
+            }
+        }
+    }
+    return false;
+}
+
+fn dumpScreenPlain(io: std.Io, allocator: std.mem.Allocator, screen: *const Screen) !void {
+    const stdout = std.Io.File.stdout();
+
+    var line: std.ArrayListUnmanaged(u8) = .empty;
+    defer line.deinit(allocator);
+
+    for (0..screen.height) |y| {
+        line.clearRetainingCapacity();
+        var keep_len: usize = 0;
+
+        for (0..screen.width) |x| {
+            const cell = screen.getCell(@intCast(x), @intCast(y)) orelse continue;
+            if (cell.width == 0) continue;
+
+            var buf: [4]u8 = undefined;
+            const s = cell.getContent(&buf);
+            try line.appendSlice(allocator, s);
+
+            const is_space = switch (cell.content) {
+                .codepoint => |cp| cp == ' ',
+                .grapheme => |g| g.len == 1 and g[0] == ' ',
+            };
+            if (!is_space) keep_len = line.items.len;
+        }
+
+        try stdout.writeStreamingAll(io, line.items[0..keep_len]);
+        try stdout.writeStreamingAll(io, "\n");
+    }
 }
 
 fn ensureDocumentReady(io: std.Io, path: []const u8) !void {
@@ -917,6 +1042,64 @@ test "resolve config path uses home directory" {
     const path = (try resolveConfigPathAlloc(allocator, &env)).?;
     defer allocator.free(path);
     try std.testing.expect(std.mem.endsWith(u8, path, ".avocado\\config.json") or std.mem.endsWith(u8, path, ".avocado/config.json"));
+}
+
+test "initial render draws banner text" {
+    const allocator = std.testing.allocator;
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var shell = try AvocadoShell.init(allocator, io, "C:\\workspace", null, null, "");
+    defer shell.deinit();
+
+    var screen = try Screen.init(allocator, 80, 24);
+    defer screen.deinit();
+
+    var ctx = RenderContext{
+        .screen = &screen,
+        .theme = &tui.Theme.default_theme,
+        .bounds = .{ .x = 0, .y = 0, .width = 80, .height = 24 },
+        .clip = .{ .x = 0, .y = 0, .width = 80, .height = 24 },
+        .focused_id = null,
+        .time_ns = 0,
+    };
+
+    shell.render(&ctx);
+
+    const cell_a = screen.getCell(1, 0).?;
+    const cell_v = screen.getCell(2, 0).?;
+    const cell_o = screen.getCell(3, 0).?;
+    try std.testing.expectEqual(@as(u21, 'A'), cell_a.content.codepoint);
+    try std.testing.expectEqual(@as(u21, 'v'), cell_v.content.codepoint);
+    try std.testing.expectEqual(@as(u21, 'o'), cell_o.content.codepoint);
+}
+
+test "app root render callback draws banner text" {
+    const allocator = std.testing.allocator;
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var shell = try AvocadoShell.init(allocator, io, "C:\\workspace", null, null, "");
+    defer shell.deinit();
+
+    var app = try tui.App.initWithAllocator(allocator, .{});
+    defer app.deinit();
+    try app.setRoot(&shell);
+
+    var screen = try Screen.init(allocator, 80, 24);
+    defer screen.deinit();
+
+    var ctx = RenderContext{
+        .screen = &screen,
+        .theme = &tui.Theme.default_theme,
+        .bounds = .{ .x = 0, .y = 0, .width = 80, .height = 24 },
+        .clip = .{ .x = 0, .y = 0, .width = 80, .height = 24 },
+        .focused_id = null,
+        .time_ns = 0,
+    };
+
+    try std.testing.expect(app.root != null);
+    try std.testing.expect(app.root_render_fn != null);
+    app.root_render_fn.?(app.root.?, &ctx);
+
+    const cell_a = screen.getCell(1, 0).?;
+    try std.testing.expectEqual(@as(u21, 'A'), cell_a.content.codepoint);
 }
 
 test "compute filename display preserves suffix when truncated" {

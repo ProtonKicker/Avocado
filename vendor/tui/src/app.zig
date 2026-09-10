@@ -244,9 +244,6 @@ pub const App = struct {
         const delta_ns = current_time - self.last_frame_ns;
         const delta_ms: u32 = @intCast(@divTrunc(delta_ns, 1_000_000));
 
-        // Paint the first frame before waiting on stdin. On Windows the
-        // current input read path can block until input arrives, which would
-        // otherwise leave the alternate screen completely blank on startup.
         if (self.needs_redraw) {
             try self.render();
             self.needs_redraw = false;
@@ -289,8 +286,23 @@ pub const App = struct {
 
     /// Process input from terminal
     fn processInput(self: *App) !void {
-        // Read input (non-blocking would be ideal)
-        // For now, we'll use a simple approach
+        if (builtin.os.tag == .windows) {
+            const kernel32 = struct {
+                extern "kernel32" fn WaitForSingleObject(
+                    hHandle: std.os.windows.HANDLE,
+                    dwMilliseconds: u32,
+                ) callconv(.winapi) u32;
+            };
+
+            const WAIT_OBJECT_0: u32 = 0;
+            const WAIT_FAILED: u32 = 0xFFFFFFFF;
+            const stdin_handle = std.Io.File.stdin().handle;
+            const wait_result = kernel32.WaitForSingleObject(stdin_handle, 0);
+            if (wait_result == WAIT_FAILED or wait_result != WAIT_OBJECT_0) {
+                return;
+            }
+        }
+
         const stdin = if (builtin.os.tag == .windows)
             std.Io.File.stdin()
         else

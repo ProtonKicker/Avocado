@@ -60,9 +60,29 @@ pub const WindowsHandle = struct {
     const INVALID_HANDLE_VALUE = @as(std.os.windows.HANDLE, @ptrFromInt(@as(usize, @bitCast(@as(isize, -1)))));
 
     pub fn init() WindowsHandle {
+        const kernel32 = struct {
+            extern "kernel32" fn GetStdHandle(nStdHandle: i32) callconv(.winapi) std.os.windows.HANDLE;
+        };
+
+        const STD_INPUT_HANDLE: i32 = -10;
+        const STD_OUTPUT_HANDLE: i32 = -11;
+
+        const stdin = kernel32.GetStdHandle(STD_INPUT_HANDLE);
+        const stdout = kernel32.GetStdHandle(STD_OUTPUT_HANDLE);
+
+        const stdin_handle = if (stdin != INVALID_HANDLE_VALUE and @intFromPtr(stdin) != 0)
+            stdin
+        else
+            std.os.windows.peb().ProcessParameters.hStdInput;
+
+        const stdout_handle = if (stdout != INVALID_HANDLE_VALUE and @intFromPtr(stdout) != 0)
+            stdout
+        else
+            std.os.windows.peb().ProcessParameters.hStdOutput;
+
         return .{
-            .stdout_handle = std.os.windows.peb().ProcessParameters.hStdOutput,
-            .stdin_handle = std.os.windows.peb().ProcessParameters.hStdInput,
+            .stdout_handle = stdout_handle,
+            .stdin_handle = stdin_handle,
         };
     }
 };
@@ -122,9 +142,11 @@ fn getWindowsTerminalSize() !TerminalSize {
             handle: std.os.windows.HANDLE,
             info: *CONSOLE_SCREEN_BUFFER_INFO,
         ) callconv(.winapi) std.os.windows.BOOL;
+        extern "kernel32" fn GetStdHandle(nStdHandle: i32) callconv(.winapi) std.os.windows.HANDLE;
     };
 
-    const handle = std.os.windows.peb().ProcessParameters.hStdOutput;
+    const STD_OUTPUT_HANDLE: i32 = -11;
+    const handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE);
 
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (kernel32.GetConsoleScreenBufferInfo(handle, &info) == .FALSE) {
@@ -212,27 +234,32 @@ fn enableWindowsRawMode(handle: *WindowsHandle) !void {
     _ = kernel32.SetConsoleOutputCP(65001);
 
     // Save original modes
-    _ = kernel32.GetConsoleMode(handle.stdin_handle, &handle.original_input_mode);
-    _ = kernel32.GetConsoleMode(handle.stdout_handle, &handle.original_output_mode);
+    const got_in = kernel32.GetConsoleMode(handle.stdin_handle, &handle.original_input_mode) != .FALSE;
+    const got_out = kernel32.GetConsoleMode(handle.stdout_handle, &handle.original_output_mode) != .FALSE;
 
     // Register control handler
     saved_windows_handle = handle.*;
     _ = kernel32.SetConsoleCtrlHandler(windowsCtrlHandler, @enumFromInt(1));
 
-    // Enable virtual terminal processing for output
-    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-    const DISABLE_NEWLINE_AUTO_RETURN: u32 = 0x0008;
-    _ = kernel32.SetConsoleMode(handle.stdout_handle, handle.original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN);
+    if (got_out) {
+        const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+        _ = kernel32.SetConsoleMode(handle.stdout_handle, handle.original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
 
-    // Configure input mode
-    const ENABLE_EXTENDED_FLAGS: u32 = 0x0080;
-    const ENABLE_WINDOW_INPUT: u32 = 0x0008;
-    const ENABLE_MOUSE_INPUT: u32 = 0x0010;
-    const ENABLE_VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
+    if (got_in) {
+        const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
+        const ENABLE_LINE_INPUT: u32 = 0x0002;
+        const ENABLE_ECHO_INPUT: u32 = 0x0004;
+        const ENABLE_WINDOW_INPUT: u32 = 0x0008;
+        const ENABLE_MOUSE_INPUT: u32 = 0x0010;
+        const ENABLE_EXTENDED_FLAGS: u32 = 0x0080;
+        const ENABLE_VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
 
-    // Disable line input, echo, and enable VT input
-    const new_mode = ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
-    _ = kernel32.SetConsoleMode(handle.stdin_handle, new_mode);
+        var new_mode: u32 = handle.original_input_mode;
+        new_mode |= ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_VIRTUAL_TERMINAL_INPUT;
+        new_mode &= ~(ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        _ = kernel32.SetConsoleMode(handle.stdin_handle, new_mode);
+    }
 }
 
 fn disableWindowsRawMode(handle: *WindowsHandle) void {
@@ -276,8 +303,10 @@ pub fn isTerminal() bool {
         .windows => {
             const kernel32 = struct {
                 extern "kernel32" fn GetConsoleMode(h: std.os.windows.HANDLE, mode: *u32) callconv(.winapi) std.os.windows.BOOL;
+                extern "kernel32" fn GetStdHandle(nStdHandle: i32) callconv(.winapi) std.os.windows.HANDLE;
             };
-            const handle = std.os.windows.peb().ProcessParameters.hStdOutput;
+            const STD_OUTPUT_HANDLE: i32 = -11;
+            const handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE);
             var mode: u32 = undefined;
             return kernel32.GetConsoleMode(handle, &mode) != .FALSE;
         },
