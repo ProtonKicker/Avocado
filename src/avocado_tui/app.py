@@ -32,18 +32,71 @@ MIN_WINDOW_HEIGHT = 7
 MIN_CONTENT_HEIGHT = 5
 
 
-class OpenFileScreen(ModalScreen[Optional[str]]):
+class PathPromptScreen(ModalScreen[Optional[str]]):
     BINDINGS = [("escape", "cancel", "Cancel")]
+    CSS = """
+    PathPromptScreen {
+        align: left top;
+        padding: 1 1 0 1;
+    }
+
+    #path-dialog {
+        width: 100%;
+        padding: 1 2;
+        background: transparent;
+    }
+
+    #path-title {
+        color: #7ec850;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #path-help {
+        color: #8b8d97;
+        margin-top: 1;
+        width: 100%;
+        content-align: right middle;
+    }
+
+    #path-submit {
+        color: #8b8d97;
+        margin-top: 1;
+    }
+
+    #path-cancel {
+        color: #8b8d97;
+    }
+
+    #path {
+        width: 100%;
+    }
+    """
 
     def __init__(
-        self, initial_path: str = "", placeholder: str = "Open file path…"
+        self,
+        initial_path: str = "",
+        title: str = "Enter file path",
+        placeholder: str = "Enter file path…",
+        path_help_text: str = "",
+        submit_text: str = "Enter=confirm",
+        cancel_text: str = "Esc=cancel",
     ) -> None:
         super().__init__()
         self._initial_path = initial_path
+        self._title = title
         self._placeholder = placeholder
+        self._path_help_text = path_help_text
+        self._submit_text = submit_text
+        self._cancel_text = cancel_text
 
     def compose(self) -> ComposeResult:
-        yield Input(value=self._initial_path, placeholder=self._placeholder, id="path")
+        with Vertical(id="path-dialog"):
+            yield Static(self._title, id="path-title")
+            yield Input(value=self._initial_path, placeholder=self._placeholder, id="path")
+            yield Static(self._path_help_text, id="path-help")
+            yield Static(self._submit_text, id="path-submit")
+            yield Static(self._cancel_text, id="path-cancel")
 
     def on_mount(self) -> None:
         input_widget = self.query_one(Input)
@@ -261,6 +314,7 @@ class AvocadoApp(App):
 
     def __init__(self, file_path: str | None = None) -> None:
         super().__init__()
+        self._launch_dir = Path.cwd().resolve(strict=False)
         self._file_path = (
             Path(file_path).expanduser().resolve(strict=False) if file_path else None
         )
@@ -329,17 +383,25 @@ class AvocadoApp(App):
         self.call_later(self._update_banner)
 
     def action_new_file(self) -> None:
-        base_dir = self._file_path.parent if self._file_path else Path.cwd()
+        base_dir = self._file_path.parent if self._file_path else self._launch_dir
         suggested = str(base_dir / "untitled.py")
         self.push_screen(
-            OpenFileScreen(suggested, "New file path…"), self._new_file_callback
+            PathPromptScreen(
+                suggested,
+                title="Enter file name and path",
+                placeholder="path\\to\\untitled.py",
+                path_help_text=f"Relative paths start from {self._launch_dir}",
+                submit_text="Enter=create",
+                cancel_text="Esc=cancel",
+            ),
+            self._new_file_callback,
         )
 
     def _new_file_callback(self, path: Optional[str]) -> None:
         if not path:
             return
 
-        self._file_path = Path(path).expanduser().resolve(strict=False)
+        self._file_path = self._resolve_user_path(path)
         editor = self.query_one("#editor", TextArea)
         editor.text = ""
         editor.focus()
@@ -347,20 +409,33 @@ class AvocadoApp(App):
         self._evaluate_now()
 
     def action_save(self) -> None:
-        if not self._file_path:
-            self.push_screen(OpenFileScreen(), self._save_as_callback)
-            return
-
-        editor = self.query_one("#editor", TextArea)
-        self._file_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file_path.write_text(editor.text, encoding="utf-8")
+        suggested = str(self._file_path or (self._launch_dir / "untitled.py"))
+        self.push_screen(
+            PathPromptScreen(
+                suggested,
+                title="Enter file name and path",
+                placeholder="path\\to\\file.py",
+                path_help_text=f"Relative paths start from {self._launch_dir}",
+                submit_text="Enter=save",
+                cancel_text="Esc=cancel",
+            ),
+            self._save_as_callback,
+        )
 
     def _save_as_callback(self, path: Optional[str]) -> None:
         if not path:
             return
-        self._file_path = Path(path).expanduser().resolve(strict=False)
+        self._file_path = self._resolve_user_path(path)
         self._update_banner()
-        self.action_save()
+        editor = self.query_one("#editor", TextArea)
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file_path.write_text(editor.text, encoding="utf-8")
+
+    def _resolve_user_path(self, raw_path: str) -> Path:
+        path = Path(raw_path.strip()).expanduser()
+        if path.is_absolute():
+            return path.resolve(strict=False)
+        return (self._launch_dir / path).resolve(strict=False)
 
     def _schedule_evaluate(self) -> None:
         if self._eval_timer is not None:

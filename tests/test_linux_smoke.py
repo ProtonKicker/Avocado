@@ -47,6 +47,45 @@ class CliPathTests(unittest.TestCase):
             app_cls.return_value.run.assert_called_once_with()
 
 
+class SavePathTests(unittest.IsolatedAsyncioTestCase):
+    def test_resolve_user_path_uses_launch_dir_for_relative_paths(self) -> None:
+        app = AvocadoApp(None)
+        app._launch_dir = Path("C:/workspace/demo").resolve(strict=False)
+
+        resolved = app._resolve_user_path("nested/file.py")
+
+        self.assertEqual(
+            resolved, (app._launch_dir / "nested/file.py").resolve(strict=False)
+        )
+
+    def test_resolve_user_path_keeps_absolute_paths(self) -> None:
+        app = AvocadoApp(None)
+        absolute = Path("C:/temp/output.py").resolve(strict=False)
+
+        resolved = app._resolve_user_path(str(absolute))
+
+        self.assertEqual(resolved, absolute)
+
+    async def test_save_as_callback_creates_parent_dirs_and_writes_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            app = AvocadoApp(None)
+            app._launch_dir = Path(tmp_dir).resolve(strict=False)
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                editor = app.query_one("#editor", TextArea)
+                editor.text = "value = int(3.14)\nvalue"
+
+                app._save_as_callback("nested/saved.py")
+
+                target = app._launch_dir / "nested" / "saved.py"
+                self.assertEqual(app._file_path, target.resolve(strict=False))
+                self.assertTrue(target.exists())
+                self.assertEqual(target.read_text(encoding="utf-8"), editor.text)
+
+                await pilot.press("ctrl+q")
+
+
 class PreludeTests(unittest.TestCase):
     def test_missing_numpy_does_not_skip_user_code(self) -> None:
         original_find_spec = importlib_util.find_spec
