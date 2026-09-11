@@ -70,15 +70,8 @@ pub const WindowsHandle = struct {
         const stdin = kernel32.GetStdHandle(STD_INPUT_HANDLE);
         const stdout = kernel32.GetStdHandle(STD_OUTPUT_HANDLE);
 
-        const stdin_handle = if (stdin != INVALID_HANDLE_VALUE and @intFromPtr(stdin) != 0)
-            stdin
-        else
-            std.os.windows.peb().ProcessParameters.hStdInput;
-
-        const stdout_handle = if (stdout != INVALID_HANDLE_VALUE and @intFromPtr(stdout) != 0)
-            stdout
-        else
-            std.os.windows.peb().ProcessParameters.hStdOutput;
+        const stdin_handle = stdin;
+        const stdout_handle = stdout;
 
         return .{
             .stdout_handle = stdout_handle,

@@ -228,11 +228,14 @@ pub const TextArea = struct {
             sub.moveCursor(text_x, @intCast(i));
 
             const line = self.lines.items[line_idx];
-            const visible_start = @min(self.scroll_x, line.items.len);
-            const visible_end = @min(visible_start + text_width, line.items.len);
-
-            if (visible_end > visible_start) {
-                sub.putString(line.items[visible_start..visible_end]);
+            const visual_len = unicode.stringWidth(line.items);
+            
+            if (self.scroll_x < visual_len) {
+                const visible_start = unicode.truncateToWidth(line.items, self.scroll_x);
+                const visible_end = unicode.truncateToWidth(line.items, self.scroll_x + text_width);
+                if (visible_end > visible_start) {
+                    sub.putString(line.items[visible_start..visible_end]);
+                }
             }
         }
     }

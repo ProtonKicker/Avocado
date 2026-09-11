@@ -502,6 +502,7 @@ const Parser = struct {
 
     fn callBuiltin(self: *Parser, name: []const u8, args: []Value) anyerror!Value {
         _ = self;
+        if (args.len < 1) return EvalError.InvalidCall;
         if (std.mem.eql(u8, name, "sin")) return .{ .number = @sin(try valueToNumber(args[0])) };
         if (std.mem.eql(u8, name, "cos")) return .{ .number = @cos(try valueToNumber(args[0])) };
         if (std.mem.eql(u8, name, "tan")) return .{ .number = @tan(try valueToNumber(args[0])) };
@@ -588,10 +589,20 @@ fn evaluateRangeWholeAlloc(allocator: std.mem.Allocator, namespace: *std.StringH
     var array = NumberArray.init(allocator);
     const epsilon = @abs(step_num) * 1e-9 + 1e-12;
     var current = start_num;
+    const MAX_RANGE_ELEMENTS: usize = 1_000_000;
+    var count: usize = 0;
     if (step_num > 0) {
-        while (current <= stop_num + epsilon) : (current += step_num) try array.append(current);
+        while (current <= stop_num + epsilon) : (current += step_num) {
+            if (count >= MAX_RANGE_ELEMENTS) return EvalError.ParseError; // Or a specific error
+            try array.append(current);
+            count += 1;
+        }
     } else {
-        while (current >= stop_num - epsilon) : (current += step_num) try array.append(current);
+        while (current >= stop_num - epsilon) : (current += step_num) {
+            if (count >= MAX_RANGE_ELEMENTS) return EvalError.ParseError;
+            try array.append(current);
+            count += 1;
+        }
     }
     return .{ .array = array };
 }

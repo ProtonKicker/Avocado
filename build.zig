@@ -32,6 +32,26 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    const test_tui_root = b.createModule(.{
+        .root_source_file = b.path("test_tui.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "tui", .module = tui_mod },
+        },
+    });
+    const test_tui_exe = b.addExecutable(.{
+        .name = "test_tui",
+        .root_module = test_tui_root,
+    });
+    b.installArtifact(test_tui_exe);
+    
+    const run_test_tui_cmd = b.addRunArtifact(test_tui_exe);
+    const run_test_tui_step = b.step("run-test-tui", "Run the test TUI");
+    run_test_tui_step.dependOn(&run_test_tui_cmd.step);
+
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);

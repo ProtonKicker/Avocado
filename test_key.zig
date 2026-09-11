@@ -1,0 +1,26 @@
+﻿const std = @import("std");
+const windows = std.os.windows;
+const kernel32 = struct {
+    extern "kernel32" fn WaitForSingleObject(hHandle: windows.HANDLE, dwMilliseconds: u32) callconv(.winapi) u32;
+    extern "kernel32" fn SetConsoleMode(hConsoleInput: windows.HANDLE, dwMode: u32) callconv(.winapi) windows.BOOL;
+};
+
+pub fn main() !void {
+    const stdin = std.Io.File.stdin();
+    _ = kernel32.SetConsoleMode(stdin.handle, 0x0200 | 0x0010 | 0x0008 | 0x0004);
+    
+    std.debug.print("Type something and press Enter...\n", .{});
+    
+    var reader_buf: [128]u8 = undefined;
+    var reader = stdin.reader(std.Io.Threaded.global_single_threaded.io(), &reader_buf);
+    var buf: [32]u8 = undefined;
+    
+    while (true) {
+        const wait_res = kernel32.WaitForSingleObject(stdin.handle, 0xFFFFFFFF);
+        if (wait_res != 0) continue;
+        
+        const bytes_read = reader.interface.readSliceShort(&buf) catch 0;
+        std.debug.print("Read {d} bytes: {any}\n", .{bytes_read, buf[0..bytes_read]});
+        if (bytes_read > 0 and buf[0] == 'q') break;
+    }
+}

@@ -378,7 +378,17 @@ pub const InputReader = struct {
     fn parseUtf8Char(self: *InputReader, bytes: []const u8) ?Event {
         _ = self;
 
-        const cp = std.unicode.utf8Decode(bytes) catch {
+        // Ensure we have a valid UTF-8 sequence length before decoding
+        const expected_len = std.unicode.utf8ByteSequenceLength(bytes[0]) catch 1;
+        if (bytes.len < expected_len) {
+            // Incomplete sequence, return as unknown or drop. Ideally we'd buffer it, 
+            // but for safety we return unknown to prevent panic.
+            return Event{
+                .key = .{ .key = .{ .unknown = bytes[0] } },
+            };
+        }
+
+        const cp = std.unicode.utf8Decode(bytes[0..expected_len]) catch {
             return Event{
                 .key = .{ .key = .{ .unknown = bytes[0] } },
             };

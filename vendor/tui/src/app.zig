@@ -287,19 +287,86 @@ pub const App = struct {
     /// Process input from terminal
     fn processInput(self: *App) !void {
         if (builtin.os.tag == .windows) {
+            const win = std.os.windows;
+            const KEY_EVENT_RECORD = extern struct {
+                bKeyDown: c_int,
+                wRepeatCount: u16,
+                wVirtualKeyCode: u16,
+                wVirtualScanCode: u16,
+                uChar: extern union { UnicodeChar: u16, AsciiChar: u8 },
+                dwControlKeyState: u32,
+            };
+
+            const MOUSE_EVENT_RECORD = extern struct {
+                dwMousePosition: extern struct { X: i16, Y: i16 },
+                dwButtonState: u32,
+                dwControlKeyState: u32,
+                dwEventFlags: u32,
+            };
+
+            const WINDOW_BUFFER_SIZE_RECORD = extern struct { dwSize: extern struct { X: i16, Y: i16 } };
+            const MENU_EVENT_RECORD = extern struct { dwCommandId: u32 };
+            const FOCUS_EVENT_RECORD = extern struct { bSetFocus: c_int };
+
+            const INPUT_RECORD = extern struct {
+                EventType: u16,
+                Event: extern union {
+                    KeyEvent: KEY_EVENT_RECORD,
+                    MouseEvent: MOUSE_EVENT_RECORD,
+                    WindowBufferSizeEvent: WINDOW_BUFFER_SIZE_RECORD,
+                    MenuEvent: MENU_EVENT_RECORD,
+                    FocusEvent: FOCUS_EVENT_RECORD,
+                },
+            };
+
             const kernel32 = struct {
-                extern "kernel32" fn WaitForSingleObject(
-                    hHandle: std.os.windows.HANDLE,
-                    dwMilliseconds: u32,
-                ) callconv(.winapi) u32;
+                pub extern "kernel32" fn WaitForSingleObject(hHandle: win.HANDLE, dwMilliseconds: u32) callconv(.winapi) u32;
+                pub extern "kernel32" fn GetNumberOfConsoleInputEvents(hConsoleInput: win.HANDLE, lpcNumberOfEvents: *u32) callconv(.winapi) c_int;
+                pub extern "kernel32" fn PeekConsoleInputW(hConsoleInput: win.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) c_int;
+                pub extern "kernel32" fn ReadConsoleInputW(hConsoleInput: win.HANDLE, lpBuffer: [*]INPUT_RECORD, nLength: u32, lpNumberOfEventsRead: *u32) callconv(.winapi) c_int;
             };
 
             const WAIT_OBJECT_0: u32 = 0;
             const WAIT_FAILED: u32 = 0xFFFFFFFF;
             const stdin_handle = std.Io.File.stdin().handle;
-            const wait_result = kernel32.WaitForSingleObject(stdin_handle, 0);
-            if (wait_result == WAIT_FAILED or wait_result != WAIT_OBJECT_0) {
-                return;
+            
+            while (true) {
+                const wait_result = kernel32.WaitForSingleObject(stdin_handle, 0);
+                if (wait_result == WAIT_FAILED or wait_result != WAIT_OBJECT_0) {
+                    return;
+                }
+
+                var num_events: u32 = 0;
+                if (kernel32.GetNumberOfConsoleInputEvents(stdin_handle, &num_events) == 0 or num_events == 0) {
+                    return;
+                }
+
+                var records: [1]INPUT_RECORD = undefined;
+                var read_count: u32 = 0;
+
+                if (kernel32.PeekConsoleInputW(stdin_handle, &records, 1, &read_count) != 0 and read_count > 0) {
+                    const ev = records[0];
+                    var consume = false;
+
+                    if (ev.EventType == 0x0001) { // KEY_EVENT
+                        if (ev.Event.KeyEvent.bKeyDown == 0 or ev.Event.KeyEvent.uChar.UnicodeChar == 0) {
+                            consume = true;
+                        }
+                    } else if (ev.EventType == 0x0002) { // MOUSE_EVENT
+                        consume = false;
+                    } else { // FOCUS, MENU, WINDOW_BUFFER_SIZE
+                        consume = true;
+                    }
+
+                    if (consume) {
+                        _ = kernel32.ReadConsoleInputW(stdin_handle, &records, 1, &read_count);
+                        continue;
+                    } else {
+                        break;
+                    }
+                } else {
+                    return;
+                }
             }
         }
 

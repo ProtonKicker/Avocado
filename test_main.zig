@@ -1,0 +1,1 @@
+﻿const std = @import("std"); pub fn main(init: std.process.Init) !void { const allocator = init.gpa; _ = allocator; const arena = init.arena.allocator(); const args = try init.minimal.args.toSlice(arena); std.debug.print("len: {}\n", .{args.len}); }

@@ -348,9 +348,10 @@ const AvocadoShell = struct {
             const line_index = self.editor.scroll_y + visible_index;
             if (line_index >= self.editor.lines.items.len) break;
             const line = self.editor.lines.items[line_index].items;
-            if (self.editor.scroll_x < line.len) {
-                const start = self.editor.scroll_x;
-                const end = @min(line.len, start + region.width);
+            const visual_len = tui.unicode.stringWidth(line);
+            if (self.editor.scroll_x < visual_len) {
+                const start = tui.unicode.truncateToWidth(line, self.editor.scroll_x);
+                const end = tui.unicode.truncateToWidth(line, self.editor.scroll_x + region.width);
                 putStringClipped(region, 0, visible_index, line[start..end], baseStyle());
             }
         }
@@ -677,6 +678,13 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "--dump-frame")) {
+        if (builtin.os.tag == .windows) {
+            const kernel32 = struct {
+                extern "kernel32" fn SetConsoleOutputCP(wCodePageID: u32) callconv(.winapi) std.os.windows.BOOL;
+            };
+            _ = kernel32.SetConsoleOutputCP(65001);
+        }
+
         const initial_text = try allocator.dupe(u8, "");
         defer allocator.free(initial_text);
 
@@ -719,13 +727,12 @@ pub fn main(init: std.process.Init) !void {
     var shell = try AvocadoShell.init(allocator, io, launch_dir, config_path, file_path, initial_text);
     defer shell.deinit();
 
-    const is_windows = builtin.os.tag == .windows;
     var app = try tui.App.initWithAllocator(allocator, .{
-        .alternate_screen = !is_windows,
-        .hide_cursor = !is_windows,
-        .enable_mouse = !is_windows,
-        .enable_paste = !is_windows,
-        .enable_focus = !is_windows,
+        .alternate_screen = true,
+        .hide_cursor = true,
+        .enable_mouse = true,
+        .enable_paste = true,
+        .enable_focus = true,
     });
     defer app.deinit();
 
@@ -807,7 +814,18 @@ fn dumpScreenPlain(io: std.Io, allocator: std.mem.Allocator, screen: *const Scre
             if (cell.width == 0) continue;
 
             var buf: [4]u8 = undefined;
-            const s = cell.getContent(&buf);
+            const s = switch (cell.content) {
+                .codepoint => |cp| switch (cp) {
+                    '─', '━' => "-",
+                    '│', '┃' => "|",
+                    '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼',
+                    '╭', '╮', '╰', '╯', '╞', '╡', '╤', '╧', '╪',
+                    '╔', '╗', '╚', '╝', '╠', '╣', '╦', '╩', '╬' => "+",
+                    '…' => "...",
+                    else => cell.getContent(&buf),
+                },
+                .grapheme => cell.getContent(&buf),
+            };
             try line.appendSlice(allocator, s);
 
             const is_space = switch (cell.content) {
@@ -950,7 +968,7 @@ fn putStringClipped(screen: *SubScreen, x: u16, y: u16, text: []const u8, style:
     screen.setStyle(style);
     screen.moveCursor(x, y);
     const width = screen.width - x;
-    const end = @min(text.len, width);
+    const end = tui.unicode.truncateToWidth(text, width);
     screen.putString(text[0..end]);
 }
 
@@ -958,7 +976,8 @@ fn putTruncated(screen: *SubScreen, x: u16, y: u16, text: []const u8, width: u16
     if (width == 0 or y >= screen.height or x >= screen.width) return;
     screen.setStyle(style);
     screen.moveCursor(x, y);
-    if (text.len <= width) {
+    const visual_len = tui.unicode.stringWidth(text);
+    if (visual_len <= width) {
         screen.putString(text);
         return;
     }
@@ -966,7 +985,8 @@ fn putTruncated(screen: *SubScreen, x: u16, y: u16, text: []const u8, width: u16
         screen.putChar('…');
         return;
     }
-    screen.putString(text[0 .. width - 1]);
+    const end = tui.unicode.truncateToWidth(text, width - 1);
+    screen.putString(text[0 .. end]);
     screen.putChar('…');
 }
 
