@@ -777,8 +777,15 @@ fn runSelfTest(io: std.Io, allocator: std.mem.Allocator, launch_dir: []const u8,
             return;
         }
 
+        const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
+        const ENABLE_WRAP_AT_EOL_OUTPUT: u32 = 0x0002;
         const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-        if (kernel32.SetConsoleMode(stdout.handle, out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) == .FALSE) return error.VTNotAvailable;
+        const vt_out_mode =
+            out_mode |
+            ENABLE_PROCESSED_OUTPUT |
+            ENABLE_WRAP_AT_EOL_OUTPUT |
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        if (kernel32.SetConsoleMode(stdout.handle, vt_out_mode) == .FALSE) return error.VTNotAvailable;
         _ = kernel32.SetConsoleMode(stdout.handle, out_mode);
     }
 

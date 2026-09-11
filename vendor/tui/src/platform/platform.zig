@@ -235,8 +235,17 @@ fn enableWindowsRawMode(handle: *WindowsHandle) !void {
     _ = kernel32.SetConsoleCtrlHandler(windowsCtrlHandler, @enumFromInt(1));
 
     if (got_out) {
+        const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
+        const ENABLE_WRAP_AT_EOL_OUTPUT: u32 = 0x0002;
         const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-        _ = kernel32.SetConsoleMode(handle.stdout_handle, handle.original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
+        // Windows VT parsing depends on processed output remaining enabled.
+        const new_out_mode =
+            handle.original_output_mode |
+            ENABLE_PROCESSED_OUTPUT |
+            ENABLE_WRAP_AT_EOL_OUTPUT |
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        _ = kernel32.SetConsoleMode(handle.stdout_handle, new_out_mode);
     }
 
     if (got_in) {
