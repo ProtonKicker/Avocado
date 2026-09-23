@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import builtins
 import math
 from typing import Any
 
 import numpy as np
 
 from .math_constants import CONSTANT_ALIASES, SCIENTIFIC_CONSTANTS
+
+if not hasattr(np, "float"):
+    np.float = float  # type: ignore[attr-defined]
 
 
 def ln(value: Any) -> Any:
@@ -71,9 +75,28 @@ def length(value: Any) -> int:
     return int(max(arr.shape))
 
 
+def latex_cdot(lhs: Any, rhs: Any) -> Any:
+    lhs_arr = np.asarray(lhs).squeeze()
+    rhs_arr = np.asarray(rhs).squeeze()
+    if lhs_arr.ndim == 0 and rhs_arr.ndim == 0:
+        return lhs * rhs
+    return np.dot(lhs_arr, rhs_arr)
+
+
+def latex_times(lhs: Any, rhs: Any) -> Any:
+    lhs_arr = np.asarray(lhs).squeeze()
+    rhs_arr = np.asarray(rhs).squeeze()
+    if lhs_arr.ndim == 0 and rhs_arr.ndim == 0:
+        return lhs * rhs
+    if lhs_arr.ndim == 1 and rhs_arr.ndim == 1 and lhs_arr.size in (2, 3) and rhs_arr.size in (2, 3):
+        return np.cross(lhs_arr, rhs_arr)
+    return lhs_arr * rhs_arr
+
+
 def build_math_globals() -> dict[str, Any]:
     env: dict[str, Any] = {
         "__builtins__": __builtins__,
+        "builtins": builtins,
         "math": math,
         "np": np,
         "numpy": np,
@@ -100,6 +123,10 @@ def build_math_globals() -> dict[str, Any]:
         "size": size,
         "length": length,
         "sum": np.sum,
+        "dot": np.dot,
+        "cross": np.cross,
+        "latex_cdot": latex_cdot,
+        "latex_times": latex_times,
     }
     env.update(SCIENTIFIC_CONSTANTS)
     for alias, target in CONSTANT_ALIASES.items():

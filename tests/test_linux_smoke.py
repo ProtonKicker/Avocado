@@ -133,3 +133,108 @@ class MixedGrammarTests(unittest.TestCase):
         user_lines = out.lines[prelude_line_count():]
         self.assertEqual(out.namespace["items"], [1, 2, 3])
         self.assertEqual(user_lines[:2], ["[1, 2, 3]", "2"])
+
+    def test_latex_fraction_and_sqrt_are_evaluated(self) -> None:
+        source = (
+            build_prelude_source()
+            + r"x = \frac{1}{2}"
+            + "\n"
+            + r"y = \sqrt{16}"
+            + "\n"
+            + r"z = frac(y)(x)"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        self.assertAlmostEqual(float(out.namespace["x"]), 0.5)
+        self.assertAlmostEqual(float(out.namespace["y"]), 4.0)
+        self.assertAlmostEqual(float(out.namespace["z"]), 8.0)
+
+    def test_latex_sum_product_and_greek_variables(self) -> None:
+        source = (
+            build_prelude_source()
+            + r"\alpha = 2"
+            + "\n"
+            + r"\theta_1 = \alpha + \sum_{i=1}^{4} i"
+            + "\n"
+            + r"p = \prod_{k=1}^{4} k"
+            + "\n"
+            + r"\theta_1 + p"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertEqual(out.namespace["alpha"], 2)
+        self.assertEqual(out.namespace["theta_1"], 12)
+        self.assertEqual(out.namespace["p"], 24)
+        self.assertEqual(user_lines[:4], ["2", "12", "24", "36"])
+
+    def test_latex_dot_and_cross_use_vector_ops(self) -> None:
+        source = (
+            build_prelude_source()
+            + "a = [1 2 3]\n"
+            + "b = [4 5 6]\n"
+            + r"d = \vec{a} \cdot \vec{b}"
+            + "\n"
+            + r"c = \vec{a} \times \vec{b}"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        self.assertEqual(float(out.namespace["d"]), 32.0)
+        self.assertEqual(out.namespace["c"].tolist(), [-3, 6, -3])
+
+    def test_latex_implicit_multiplication_and_grouping(self) -> None:
+        source = (
+            build_prelude_source()
+            + "x = 2\n"
+            + "y = 3\n"
+            + r"z = 2x + (x+1)(y+1)"
+            + "\n"
+            + r"w = \sqrt[3]{8}"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        self.assertEqual(out.namespace["z"], 16)
+        self.assertAlmostEqual(float(out.namespace["w"]), 2.0)
+
+    def test_multiline_python_blocks_share_state(self) -> None:
+        source = (
+            build_prelude_source()
+            + "total = 0\n"
+            + "for i in range(4):\n"
+            + "    total += i\n"
+            + "total\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertEqual(out.namespace["total"], 6)
+        self.assertEqual(user_lines[:4], ["0", "", "", "6"])
+
+    def test_numpy_scalar_display_is_plain_number(self) -> None:
+        source = (
+            build_prelude_source()
+            + "scalar = np.array(0.5)\n"
+            + "scalar\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertEqual(user_lines[:2], ["0.5", "0.5"])
+
+    def test_desmos_style_sqrt_works_in_python_fallback(self) -> None:
+        source = build_prelude_source() + "sqrt(3)\n"
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertTrue(user_lines[0].startswith("1.732050807"))
+
+    def test_numpy_float_alias_maps_to_builtin_float(self) -> None:
+        source = build_prelude_source() + "np.float(3)\n"
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertEqual(user_lines[0], "3.0")

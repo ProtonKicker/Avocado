@@ -9,7 +9,9 @@ description = "Terminal-native math notebook with inline results"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "antlr4-python3-runtime==4.11.*",
   "numpy>=1.26",
+  "sympy>=1.14",
   "textual>=0.70.0",
 ]
 

@@ -1,8 +1,8 @@
 # Avocado's Constant
 
-Terminal-native math notebook: edit a `.txt` document on the left and see per-line results on the right. The evaluator is math-first, while still accepting Python and MATLAB-like lines in the same document.
+Terminal-native math notebook: edit a `.txt` document on the left and see per-line results on the right. The evaluator is math-first, while still accepting Python, MATLAB-like, LaTeX-like, and Desmos-style basic math input in the same document.
 
-The app backend is still Python-based: the TUI runs on `Textual`, the runtime uses Python plus `numpy`, and the mixed-grammar evaluator adds a lightweight MATLAB-like syntax layer on top of the Python engine.
+The app backend is still Python-based: the TUI runs on `Textual`, the runtime uses Python plus `numpy`, and the mixed-grammar evaluator layers practical MATLAB-like syntax, parser-backed LaTeX math, and Desmos-style basic function aliases on top of the Python engine.
 
 ## Features
 
@@ -14,10 +14,14 @@ The app backend is still Python-based: the TUI runs on `Textual`, the runtime us
 - `.txt`-only save workflow in the UI for mixed math notes instead of `.py` scratch files.
 - Per-line evaluation with captured `stdout` / `stderr`.
 - Mixed grammar support in one document:
+  - Desmos-style basic math such as `sin(3)`, `cos(3)`, `sqrt(4)`, `pi`, and `e`,
   - natural math such as `sin(pi/2)`, `e^x`, `ln(10)`,
   - MATLAB-like ranges such as `1:1:10`,
   - MATLAB-style matrices such as `[1 2 3; 4 5 6]`,
-  - Python assignments and expressions when useful.
+  - parser-backed LaTeX math such as `\frac{1}{2}`, `\sqrt[3]{8}`, `\sum_{i=1}^{n} i`, `\prod_{k=1}^{4} k`, `\alpha`, `\theta_1`,
+  - vector-style LaTeX operators such as `\vec{a} \cdot \vec{b}` and `\vec{a} \times \vec{b}`,
+  - Python assignments, expressions, and small multi-line blocks when useful,
+  - compatibility behavior such as `np.float(x)` mapping to builtin `float` on modern NumPy.
 
 ## Requirements
 
@@ -117,6 +121,8 @@ e^x
 
 ## Notes
 
-- Evaluation is line-by-line, so multi-line Python blocks such as `def`, `for`, or `if` with indented bodies still do not behave like a full Python file.
+- Evaluation still maps outputs line-by-line, but basic indented Python blocks such as `def`, `for`, and `if` now execute as one chunk.
 - By default, evaluation stops at the first error and later lines show `Skipped`.
-- Phase 1 intentionally focuses on practical math aliases, ranges, and matrices instead of full LaTeX or full MATLAB compatibility.
+- Desmos-style support currently means basic calculator syntax and common function names such as `sqrt`, `sin`, `cos`, `tan`, `pi`, and `e`; it is not full Desmos graph syntax.
+- MATLAB-like support currently focuses on practical math entry such as ranges and matrix literals; it is not full MATLAB compatibility.
+- LaTeX support is parser-backed via `sympy` and includes fractions, indexed roots, Greek symbols, implicit multiplication, grouped products, sums, products, and vector-style `\cdot` / `\times` helpers, but not the full LaTeX math ecosystem.
