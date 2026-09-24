@@ -54,6 +54,10 @@ def _translate_latex_expr(expr: str) -> str:
             left, right = split
             return f"{call_name}({_translate_latex_expr(left)}, {_translate_latex_expr(right)})"
 
+    aggregate = _translate_substack_aggregate(text)
+    if aggregate is not None:
+        return aggregate
+
     try:
         from sympy.parsing.latex import parse_latex
     except ImportError as exc:  # pragma: no cover - dependency issue at runtime
@@ -118,6 +122,43 @@ def _normalize_latex_source(expr: str) -> str:
     return text
 
 
+def _translate_substack_aggregate(text: str) -> str | None:
+    if text.startswith(r"\sum"):
+        aggregate_name = "builtins.sum"
+        index = len(r"\sum")
+    elif text.startswith(r"\prod"):
+        aggregate_name = "math.prod"
+        index = len(r"\prod")
+    else:
+        return None
+
+    lower_text: str | None = None
+    upper_text: str | None = None
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text) or text[index] not in "_^":
+            break
+        marker = text[index]
+        script_text, index = _parse_script_argument(text, index + 1)
+        if marker == "_":
+            lower_text = script_text
+        else:
+            upper_text = script_text
+
+    if lower_text is None or not lower_text.lstrip().startswith(r"\substack"):
+        return None
+
+    body = text[index:].strip()
+    if not body:
+        raise MathSyntaxError("Expected a LaTeX expression after sum/product limits")
+
+    clause_parts = _build_substack_clauses(lower_text, upper_text)
+    body_code = _translate_latex_expr(body)
+    generator = f"({body_code} {' '.join(clause_parts)})"
+    return f"{aggregate_name}({generator})"
+
+
 def _strip_wrapper_commands(text: str) -> str:
     pattern = re.compile(
         rf"\\(?:{'|'.join(_WRAPPER_COMMANDS)})\s*\{{([^{{}}]+)\}}"
@@ -148,6 +189,130 @@ def _normalize_legacy_frac_calls(text: str) -> str:
         out.append(text[i])
         i += 1
     return "".join(out)
+
+
+def _build_substack_clauses(lower_text: str, shared_upper: str | None) -> list[str]:
+    content, _ = _parse_command_group(lower_text.strip(), r"\substack")
+    lines = _split_substack_lines(content)
+    clauses: list[str] = []
+    binder_count = 0
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        binding = _parse_substack_binding(line, shared_upper)
+        if binding is not None:
+            clauses.append(binding)
+            binder_count += 1
+            continue
+        clauses.append(f"if {_translate_latex_condition(line)}")
+
+    if binder_count == 0:
+        raise MathSyntaxError(r"\substack requires at least one index binding")
+    return clauses
+
+
+def _parse_substack_binding(line: str, shared_upper: str | None) -> str | None:
+    equal_match = re.fullmatch(r"(.+?)\s*=\s*(.+)", line)
+    if equal_match is not None:
+        if shared_upper is None:
+            raise MathSyntaxError(
+                r"\substack bindings of the form i=1 require an outer upper bound such as ^{n}"
+            )
+        var_name = _sanitize_identifier(equal_match.group(1))
+        start_code = _translate_latex_expr(equal_match.group(2))
+        stop_code = _translate_latex_expr(shared_upper)
+        return f"for {var_name} in range(int({start_code}), int({stop_code}) + 1)"
+
+    normalized = _normalize_relation_operators(line)
+    lower_chain = re.fullmatch(r"(.+?)\s*<=\s*(.+?)\s*<=\s*(.+)", normalized)
+    if lower_chain is not None:
+        start_code = _translate_latex_expr(lower_chain.group(1))
+        var_name = _sanitize_identifier(lower_chain.group(2))
+        stop_code = _translate_latex_expr(lower_chain.group(3))
+        return f"for {var_name} in range(int({start_code}), int({stop_code}) + 1)"
+
+    upper_chain = re.fullmatch(r"(.+?)\s*>=\s*(.+?)\s*>=\s*(.+)", normalized)
+    if upper_chain is not None:
+        start_code = _translate_latex_expr(upper_chain.group(1))
+        var_name = _sanitize_identifier(upper_chain.group(2))
+        stop_code = _translate_latex_expr(upper_chain.group(3))
+        return f"for {var_name} in range(int({start_code}), int({stop_code}) - 1, -1)"
+
+    return None
+
+
+def _translate_latex_condition(text: str) -> str:
+    normalized = _normalize_relation_operators(text)
+    normalized = re.sub(r"(?<![<>=!])=(?!=)", "==", normalized)
+    parts = re.split(r"(<=|>=|!=|==|<|>)", normalized)
+    if len(parts) == 1:
+        return _translate_latex_expr(normalized)
+    translated_parts: list[str] = []
+    for index, part in enumerate(parts):
+        stripped = part.strip()
+        if not stripped:
+            continue
+        if index % 2 == 1:
+            translated_parts.append(stripped)
+        else:
+            translated_parts.append(_translate_latex_expr(stripped))
+    return " ".join(translated_parts)
+
+
+def _normalize_relation_operators(text: str) -> str:
+    return (
+        text.replace(r"\leq", "<=")
+        .replace(r"\le", "<=")
+        .replace(r"\geq", ">=")
+        .replace(r"\ge", ">=")
+        .replace(r"\neq", "!=")
+        .replace(r"\ne", "!=")
+    )
+
+
+def _parse_command_group(text: str, command: str) -> tuple[str, int]:
+    if not text.startswith(command):
+        raise MathSyntaxError(f"Expected {command}")
+    return _parse_group(text, len(command))
+
+
+def _split_substack_lines(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch in "({":
+            depth += 1
+        elif ch in ")}":
+            depth -= 1
+        if depth == 0 and text.startswith(r"\\", i):
+            parts.append("".join(current))
+            current = []
+            i += 2
+            continue
+        current.append(ch)
+        i += 1
+    parts.append("".join(current))
+    return parts
+
+
+def _parse_script_argument(text: str, start: int) -> tuple[str, int]:
+    index = start
+    while index < len(text) and text[index].isspace():
+        index += 1
+    if index >= len(text):
+        raise MathSyntaxError("Expected LaTeX script argument")
+    if text[index] in "({":
+        return _parse_group(text, index)
+    if text[index] == "\\":
+        end = index + 1
+        while end < len(text) and text[end].isalpha():
+            end += 1
+        return text[index:end], end
+    return text[index], index + 1
 
 
 def _translate_legacy_structured_commands(text: str) -> str:

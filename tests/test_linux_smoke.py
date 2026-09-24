@@ -119,6 +119,14 @@ class MixedGrammarTests(unittest.TestCase):
         self.assertAlmostEqual(float(out.namespace["y"]), 20.085536923187668)
         self.assertAlmostEqual(float(out.namespace["z"]), 4.0)
 
+    def test_only_pi_and_e_are_preloaded_constants(self) -> None:
+        source = build_prelude_source() + "k = 4\nk + 1\n"
+        out = evaluate_source_linewise(source)
+
+        user_lines = out.lines[prelude_line_count():]
+        self.assertEqual(out.namespace["k"], 4)
+        self.assertEqual(user_lines[:2], ["4", "5"])
+
     def test_matlab_range_and_matrix_literals(self) -> None:
         source = build_prelude_source() + "r = 1:1:5\nm = [1 2 3; 4 5 6]\n"
         out = evaluate_source_linewise(source)
@@ -199,6 +207,29 @@ class MixedGrammarTests(unittest.TestCase):
 
         self.assertEqual(out.namespace["z"], 16)
         self.assertAlmostEqual(float(out.namespace["w"]), 2.0)
+
+    def test_latex_substack_sum_and_product_work(self) -> None:
+        source = (
+            build_prelude_source()
+            + r"s = \sum_{\substack{i=1 \\ j=1}}^{3} i j"
+            + "\n"
+            + r"p = \prod_{\substack{i=1 \\ j=1}}^{2} (i+j)"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        self.assertEqual(out.namespace["s"], 36)
+        self.assertEqual(out.namespace["p"], 72)
+
+    def test_latex_substack_conditions_filter_terms(self) -> None:
+        source = (
+            build_prelude_source()
+            + r"t = \sum_{\substack{1 \le i \le 4 \\ i \ne 2}} i"
+            + "\n"
+        )
+        out = evaluate_source_linewise(source)
+
+        self.assertEqual(out.namespace["t"], 8)
 
     def test_multiline_python_blocks_share_state(self) -> None:
         source = (
