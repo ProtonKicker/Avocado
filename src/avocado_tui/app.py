@@ -299,6 +299,8 @@ class AvocadoApp(App):
         border: none;
         background: #0b0b0f;
         color: #cfd0da;
+        scrollbar-size: 0 0;
+        overflow: hidden;
     }}
 
     """.format(
