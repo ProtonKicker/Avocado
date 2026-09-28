@@ -124,6 +124,43 @@ class SyncedEditor(TextArea):
             results.scroll_to(y=new_value, animate=False, immediate=True)
 
 
+class ResultsPanel(TextArea):
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_y(old_value, new_value)
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        editor = app.query_one("#editor", TextArea)
+        if round(new_value) != round(editor.scroll_y):
+            self.scroll_to(y=editor.scroll_y, animate=False, immediate=True)
+
+    async def _on_mouse_down(self, event: events.MouseDown) -> None:
+        await super()._on_mouse_down(event)
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        button = getattr(event, "button", 1)
+        if button != 1:
+            return
+        top = int(round(self.scroll_y))
+        line_index = top + event.y
+        app._last_clicked_result_line = line_index
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        editor = app.query_one("#editor", TextArea)
+        editor.scroll_to(y=max(0, editor.scroll_y - 3), animate=False, immediate=True)
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        app = self.app
+        if not isinstance(app, AvocadoApp):
+            return
+        editor = app.query_one("#editor", TextArea)
+        editor.scroll_to(y=editor.scroll_y + 3, animate=False, immediate=True)
+
+
 class Banner(Static):
     def on_mouse_down(self, event: events.MouseDown) -> None:
         app = self.app
@@ -300,7 +337,6 @@ class AvocadoApp(App):
         background: #0b0b0f;
         color: #cfd0da;
         scrollbar-size: 0 0;
-        overflow: hidden;
     }}
 
     """.format(
@@ -309,6 +345,7 @@ class AvocadoApp(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+c", "copy", "Copy"),
         ("ctrl+n", "new_file", "New file"),
         ("ctrl+s", "save", "Save"),
         ("ctrl+r", "toggle_results", "Toggle results"),
@@ -327,6 +364,8 @@ class AvocadoApp(App):
         self._banner_path_visible = True
         self._banner_right_start_x = 0
         self._banner_filename_start_x = 0
+        self._last_results_full: list[str] = []
+        self._last_clicked_result_line: int | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -344,7 +383,7 @@ class AvocadoApp(App):
                     id="editor",
                 )
                 yield Divider("│", id="divider")
-                results = TextArea.code_editor(
+                results = ResultsPanel.code_editor(
                     "",
                     language=None,
                     theme="css",
@@ -357,6 +396,8 @@ class AvocadoApp(App):
                     id="results",
                 )
                 results.can_focus = False
+                results.show_vertical_scrollbar = False
+                results.show_horizontal_scrollbar = False
                 yield results
             yield HorizontalSplit(
                 TOOLBAR_LABEL,
@@ -465,11 +506,37 @@ class AvocadoApp(App):
             user_outputs = user_outputs + [""] * (len(user_lines) - len(user_outputs))
         else:
             user_outputs = user_outputs[: len(user_lines)]
+        self._last_results_full = user_outputs
         width = max(1, self._results_width - 1)
         cropped = truncate_lines(user_outputs, width)
         results.text = "\n".join(cropped)
         if round(results.scroll_y) != round(editor.scroll_y):
             results.scroll_to(y=editor.scroll_y, animate=False, immediate=True)
+
+    def _copy_result_line(self, line_index: int) -> None:
+        if line_index < 0 or line_index >= len(self._last_results_full):
+            return
+        self.copy_to_clipboard(self._last_results_full[line_index])
+
+    def action_copy(self) -> None:
+        if self._results_visible:
+            results = self.query_one("#results", TextArea)
+            selection = results.selection
+            if selection is not None and not selection.is_empty:
+                start_row = min(selection.start[0], selection.end[0])
+                end_row = max(selection.start[0], selection.end[0])
+                if 0 <= start_row <= end_row < len(self._last_results_full):
+                    text = "\n".join(self._last_results_full[start_row : end_row + 1])
+                    self.copy_to_clipboard(text)
+                    return
+            if self._last_clicked_result_line is not None:
+                self._copy_result_line(self._last_clicked_result_line)
+                return
+        editor = self.query_one("#editor", TextArea)
+        try:
+            editor.action_copy()
+        except Exception:
+            return
 
     def _apply_results_width(self) -> None:
         results = self.query_one("#results", TextArea)

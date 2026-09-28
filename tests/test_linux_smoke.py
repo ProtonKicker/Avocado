@@ -31,6 +31,45 @@ class LinuxSmokeTests(unittest.IsolatedAsyncioTestCase):
 
             await pilot.press("ctrl+q")
 
+    async def test_results_panel_scroll_tracks_editor(self) -> None:
+        app = AvocadoApp(None)
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            editor = app.query_one("#editor", TextArea)
+            results = app.query_one("#results", TextArea)
+
+            editor.text = "\n".join([f"a = {i}" for i in range(300)])
+            app._evaluate_now()
+            await pilot.pause()
+
+            editor.scroll_to(y=80, animate=False, immediate=True)
+            await pilot.pause()
+
+            self.assertEqual(round(results.scroll_y), round(editor.scroll_y))
+
+            await pilot.press("ctrl+q")
+
+    async def test_clicking_results_panel_does_not_crash(self) -> None:
+        app = AvocadoApp(None)
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            editor = app.query_one("#editor", TextArea)
+            editor.text = "a = 1\nb = 2\n"
+            app._evaluate_now()
+            await pilot.pause()
+
+            clicked = await pilot.click("#results", offset=(1, 1))
+            await pilot.pause()
+
+            self.assertTrue(clicked)
+            self.assertEqual(app._last_clicked_result_line, 1)
+
+            await pilot.press("ctrl+q")
+
 
 class CliPathTests(unittest.TestCase):
     def test_main_creates_missing_txt_file_before_launch(self) -> None:
@@ -269,3 +308,58 @@ class MixedGrammarTests(unittest.TestCase):
 
         user_lines = out.lines[prelude_line_count():]
         self.assertEqual(user_lines[0], "3.0")
+
+
+class ResultsCopyTests(unittest.TestCase):
+    def test_copy_result_line_uses_full_value(self) -> None:
+        app = AvocadoApp(None)
+        app._last_results_full = ["", "np.float64(0.5)", "123"]
+        with patch.object(app, "copy_to_clipboard") as copier:
+            app._copy_result_line(1)
+        copier.assert_called_once_with("np.float64(0.5)")
+
+    def test_ctrl_c_copies_last_clicked_result(self) -> None:
+        app = AvocadoApp(None)
+        app._results_visible = True
+        app._last_results_full = ["", "hello"]
+        app._last_clicked_result_line = 1
+        results = TextArea()
+        editor = TextArea()
+
+        def fake_query_one(selector: str, *args, **kwargs):
+            if selector == "#results":
+                return results
+            if selector == "#editor":
+                return editor
+            raise KeyError(selector)
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+        with patch.object(app, "copy_to_clipboard") as copier:
+            app.action_copy()
+        copier.assert_called_once_with("hello")
+
+    def test_ctrl_c_copies_multi_line_results_selection(self) -> None:
+        from textual.document._document import Selection
+
+        app = AvocadoApp(None)
+        app._results_visible = True
+        app._last_results_full = ["a", "b", "c", "d"]
+
+        results = TextArea()
+        results.text = "a\nb\nc\nd"
+        results.selection = Selection((1, 0), (3, 1))
+
+        editor = TextArea()
+
+        def fake_query_one(selector: str, *args, **kwargs):
+            if selector == "#results":
+                return results
+            if selector == "#editor":
+                return editor
+            raise KeyError(selector)
+
+        app.query_one = fake_query_one  # type: ignore[method-assign]
+
+        with patch.object(app, "copy_to_clipboard") as copier:
+            app.action_copy()
+        copier.assert_called_once_with("b\nc\nd")
