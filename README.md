@@ -6,7 +6,7 @@ The backend is Python: `textual` for the TUI, `numpy` for values, `sympy` plus a
 
 ## Install
 
-**Fast install** — downloads the repo, installs into a dedicated virtual environment, and puts an `avocado` launcher on your PATH. Re-run it any time to update to the latest `main`.
+**Fast install** — downloads the repo, installs into a dedicated virtual environment, and puts an `avocado` launcher on your PATH. The installer adds `~/.local/bin` to your shell startup files (`~/.zshrc`, `~/.bashrc`, `~/.profile`, fish config) when it is missing, so `avocado` works from any directory in new terminals. Re-run it any time to update to the latest `main`.
 
 macOS / Linux:
 
