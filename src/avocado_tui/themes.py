@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import re
 import sys
 from typing import Callable
 
@@ -79,61 +79,6 @@ def palette_for(name: str) -> dict[str, str]:
     return LIGHT_VARS if name == LIGHT_NAME else DARK_VARS
 
 
-def _run(args: list[str]) -> str | None:
-    try:
-        completed = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip()
-
-
-def _match_scheme(text: str) -> str | None:
-    lowered = text.lower()
-    if "dark" in lowered:
-        return "dark"
-    if "light" in lowered:
-        return "light"
-    return None
-
-
-def _macos_scheme() -> str | None:
-    # AppleInterfaceStyle is only written while Dark mode is active; a failed
-    # read is the documented signal for Light mode.
-    try:
-        completed = subprocess.run(
-            ["defaults", "read", "-g", "AppleInterfaceStyle"],
-            capture_output=True,
-            text=True,
-            timeout=1.0,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return "light"
-    return _match_scheme(completed.stdout) or "light"
-
-
-def _windows_scheme() -> str | None:
-    try:
-        import winreg
-    except ImportError:
-        return None
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-    except OSError:
-        return None
-    return "light" if value else "dark"
-
-
 def _colorfgbg_scheme() -> str | None:
     # COLORFGBG is "fg;bg"; the background is what decides light vs dark.
     last = os.environ.get("COLORFGBG", "").strip().split(";")[-1].strip()
@@ -148,29 +93,126 @@ def _colorfgbg_scheme() -> str | None:
     return "dark" if index <= 7 else "light"
 
 
-def _linux_scheme() -> str | None:
-    for args in (
-        ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
-        ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
-        ["kde-config", "--color-scheme"],
-        ["plasma-apply-color-scheme", "--get"],
-    ):
-        text = _run(args)
-        if text is None:
-            continue
-        scheme = _match_scheme(text)
-        if scheme is not None:
-            return scheme
-    return _colorfgbg_scheme()
+# XTerm OSC extension: ask the terminal for its default background colour.
+OSC11_QUERY = "\x1b]11;?\x1b\\"
+_OSC11_RGB = re.compile(
+    r"\x1b\]11;rgb:([0-9a-fA-F]{1,4})/([0-9a-fA-F]{1,4})/([0-9a-fA-F]{1,4})",
+    re.ASCII,
+)
+_LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
+_LIGHT_THRESHOLD = 0.18
 
 
-_DETECTORS: dict[str, Callable[[], str | None]] = {
-    "darwin": _macos_scheme,
-    "win32": _windows_scheme,
+def parse_osc11(text: str) -> tuple[int, int, int] | None:
+    """Return the 8-bit background colour from an OSC 11 response."""
+    match = _OSC11_RGB.search(text)
+    if match is None:
+        return None
+    components: list[int] = []
+    for digits in match.groups():
+        scaled = int(digits, 16) / (16 ** len(digits) - 1)
+        components.append(round(scaled * 255))
+    return components[0], components[1], components[2]
+
+
+def scheme_from_rgb(rgb: tuple[int, int, int]) -> str:
+    luminance = sum(
+        weight * (value / 255) ** 2.2
+        for weight, value in zip(_LUMA_WEIGHTS, rgb)
+    )
+    return "light" if luminance > _LIGHT_THRESHOLD else "dark"
+
+
+def _response_complete(text: str) -> bool:
+    match = _OSC11_RGB.search(text)
+    if match is None:
+        return False
+    tail = text[match.end():]
+    return tail.startswith("\x1b\\") or "\x07" in tail[:8]
+
+
+def _scheme_from_response(text: str) -> str | None:
+    rgb = parse_osc11(text)
+    return None if rgb is None else scheme_from_rgb(rgb)
+
+
+def _query_posix(timeout: float) -> str | None:
+    import select
+    import termios
+    import time
+    import tty
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    fd = sys.stdin.fileno()
+    try:
+        attrs_before = termios.tcgetattr(fd)
+    except (ValueError, OSError):
+        return None
+    try:
+        # cbreak (not raw) so Ctrl+C keeps signalling if the terminal never
+        # answers and the user gives up before the timeout.
+        tty.setcbreak(fd)
+        sys.stdout.write(OSC11_QUERY)
+        sys.stdout.flush()
+        buf = ""
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            ready, _, _ = select.select([fd], [], [], remaining)
+            if not ready:
+                break
+            try:
+                chunk = os.read(fd, 256)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk.decode("latin-1")
+            if _response_complete(buf):
+                break
+        return _scheme_from_response(buf)
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, attrs_before)
+
+
+def _query_windows(timeout: float) -> str | None:
+    import msvcrt
+    import time
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    try:
+        sys.stdout.write(OSC11_QUERY)
+        sys.stdout.flush()
+        buf = ""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if msvcrt.kbhit():
+                buf += msvcrt.getwch()
+                if _response_complete(buf):
+                    break
+            else:
+                time.sleep(0.01)
+        return _scheme_from_response(buf)
+    except OSError:
+        return None
+
+
+_QUERIES: dict[str, Callable[[float], str | None]] = {
+    "win32": _query_windows,
 }
+
+QUERY_TIMEOUT_SECONDS = 0.5
 
 
 def detect_scheme() -> str:
-    """Return the OS appearance as "light" or "dark". Never raises."""
-    detector = _DETECTORS.get(sys.platform, _linux_scheme)
-    return detector() or "dark"
+    """Return the terminal's own appearance as "light" or "dark". Never raises."""
+    query = _QUERIES.get(sys.platform, _query_posix)
+    try:
+        scheme = query(QUERY_TIMEOUT_SECONDS)
+    except Exception:
+        scheme = None
+    return scheme or _colorfgbg_scheme() or "dark"

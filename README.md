@@ -62,11 +62,15 @@ These are practical entry syntaxes, not full Desmos, MATLAB, or LaTeX support: e
 
 ## Theme
 
-The notebook follows your operating system's light/dark appearance. It is read at startup and
-re-checked every couple of seconds, so switching macOS to Dark mode (or the equivalent on Windows
-and GNOME/KDE) recolours an open document immediately — no restart, and the dark palette is the
-same one the app has always used. Detection is the OS setting, not your terminal's own palette,
-and falls back to dark when it cannot decide.
+The notebook follows your **terminal's** light/dark appearance. At startup it asks
+the terminal for its own background colour (the OSC 11 escape query that Kitty,
+iTerm2, Windows Terminal, Alacritty, WezTerm and Ghostty all answer), classifies
+it by luminance, and picks the matching palette — the dark palette is the same
+one the app has always used. Terminals that do not answer the query fall back to
+the `COLORFGBG` environment variable, and then to dark. Because the terminal's
+colour is read when `avocado` starts, changing your terminal's theme recolours
+documents opened afterwards; switch the terminal profile or restart to pick up
+the new appearance.
 
 ## Keys
 

@@ -388,11 +388,6 @@ class AvocadoApp(App):
         if self.is_running:
             self.call_after_refresh(self._update_banner)
 
-    def _sync_theme_to_system(self) -> None:
-        target = theme_name_for(detect_scheme())
-        if target != self.theme:
-            self.theme = target
-
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -440,7 +435,6 @@ class AvocadoApp(App):
         self._update_banner()
         self.call_later(self._update_banner)
         self._evaluate_now()
-        self.set_interval(2.0, self._sync_theme_to_system)
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "editor":
