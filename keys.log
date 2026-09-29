@@ -1,0 +1,50 @@
+---
+FEED '\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\'
+character='\x1b'
+sequence='\x1b]'
+sequence='\x1b]1'
+sequence='\x1b]11'
+sequence='\x1b]11;'
+sequence='\x1b]11;r'
+sequence='\x1b]11;rg'
+sequence='\x1b]11;rgb'
+sequence='\x1b]11;rgb:'
+sequence='\x1b]11;rgb:1'
+sequence='\x1b]11;rgb:1e'
+sequence='\x1b]11;rgb:1e1'
+sequence='\x1b]11;rgb:1e1e'
+sequence='\x1b]11;rgb:1e1e/'
+sequence='\x1b]11;rgb:1e1e/1'
+sequence='\x1b]11;rgb:1e1e/1e'
+sequence='\x1b]11;rgb:1e1e/1e1'
+sequence='\x1b]11;rgb:1e1e/1e1e'
+sequence='\x1b]11;rgb:1e1e/1e1e/'
+sequence='\x1b]11;rgb:1e1e/1e1e/1'
+sequence='\x1b]11;rgb:1e1e/1e1e/1e'
+sequence='\x1b]11;rgb:1e1e/1e1e/1e1'
+sequence='\x1b]11;rgb:1e1e/1e1e/1e1e'
+REISSUE '\x1b]11;rgb:1e1e/1e1e/1e1e'
+Key(key='circumflex_accent', character='^', name='circumflex_accent', is_printable=True)
+Key(key='right_square_bracket', character=']', name='right_square_bracket', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='semicolon', character=';', name='semicolon', is_printable=True)
+Key(key='r', character='r', name='r', is_printable=True)
+Key(key='g', character='g', name='g', is_printable=True)
+Key(key='b', character='b', name='b', is_printable=True)
+Key(key='colon', character=':', name='colon', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+Key(key='slash', character='/', name='slash', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+Key(key='slash', character='/', name='slash', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+Key(key='1', character='1', name='1', is_printable=True)
+Key(key='e', character='e', name='e', is_printable=True)
+sequence='\x1b\\'
