@@ -10,3 +10,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.qoder/settings.local.json
+.qoder/settings.local.json
+.qoder/settings.local.json
