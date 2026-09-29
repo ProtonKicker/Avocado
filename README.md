@@ -60,6 +60,14 @@ e^x
 
 These are practical entry syntaxes, not full Desmos, MATLAB, or LaTeX support: evaluation stops at the first error and later lines show `Skipped`.
 
+## Theme
+
+The notebook follows your operating system's light/dark appearance. It is read at startup and
+re-checked every couple of seconds, so switching macOS to Dark mode (or the equivalent on Windows
+and GNOME/KDE) recolours an open document immediately — no restart, and the dark palette is the
+same one the app has always used. Detection is the OS setting, not your terminal's own palette,
+and falls back to dark when it cannot decide.
+
 ## Keys
 
 - Ctrl+S save, Ctrl+N new document, Ctrl+R toggle the results panel, Ctrl+Q quit, Esc close the path prompt

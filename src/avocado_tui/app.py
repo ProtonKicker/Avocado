@@ -20,9 +20,15 @@ from .config import (
 )
 from .evaluator import evaluate_source_linewise, truncate_lines
 from .prelude import build_prelude_source, prelude_line_count
+from .themes import (
+    LIGHT,
+    DARK,
+    detect_scheme,
+    palette_for,
+    theme_name_for,
+)
 
 
-ACCENT = "#7ec850"
 TOOLBAR_LABEL = "ctrl+q quit  ctrl+n new  ctrl+s save  ctrl+r results"
 MIN_WINDOW_WIDTH = cell_len(f" {TOOLBAR_LABEL} ")
 MIN_LEFT_PANEL_WIDTH = (MIN_WINDOW_WIDTH + 1) // 2
@@ -47,29 +53,36 @@ class PathPromptScreen(ModalScreen[Optional[str]]):
     }
 
     #path-title {
-        color: #7ec850;
+        color: $accent;
         text-style: bold;
         margin-bottom: 1;
     }
 
     #path-help {
-        color: #8b8d97;
+        color: $muted;
         margin-top: 1;
         width: 100%;
         content-align: right middle;
     }
 
     #path-submit {
-        color: #8b8d97;
+        color: $muted;
         margin-top: 1;
     }
 
     #path-cancel {
-        color: #8b8d97;
+        color: $muted;
     }
 
     #path {
         width: 100%;
+        background: $canvas;
+        color: $ink;
+        border: tall $border-blurred;
+    }
+
+    #path:focus {
+        border: tall $border;
     }
     """
 
@@ -274,74 +287,69 @@ class HorizontalSplit(Static):
 
 class AvocadoApp(App):
     CSS = """
-    Screen {{
-        background: #0b0b0f;
-        color: #e8e8f0;
-    }}
+    Screen {
+        background: $canvas;
+        color: $ink;
+    }
 
-    #banner {{
+    #banner {
         height: 1;
         padding: 0 1;
-        color: #cfd0da;
-        background: #0b0b0f;
+        color: $ink_dim;
         overflow: hidden hidden;
         text-wrap: nowrap;
         text-overflow: clip;
-    }}
+    }
 
-    #hsplit {{
+    #hsplit {
         height: 1;
-        background: #0b0b0f;
-        color: #3a3d45;
-    }}
+        color: $rule;
+    }
 
-    #toolbar {{
+    #toolbar {
         height: 1;
-        background: #0b0b0f;
-        color: #3a3d45;
-    }}
+        color: $rule;
+    }
 
-    #body {{
+    #body {
         height: 1fr;
-    }}
+    }
 
-    #editor {{
+    #editor {
         width: 1fr;
-        min-width: {min_editor_widget_width};
+        min-width: $avocado-min-editor-width;
         height: 100%;
         border: none;
-        background: #0b0b0f;
-    }}
+        background: $canvas;
+    }
 
-    #divider {{
+    #divider {
         width: 1;
         height: 100%;
-        background: #0b0b0f;
-        color: #3a3d45;
-    }}
+        color: $rule;
+    }
 
-    #divider:hover {{
-        background: #0b0b0f;
-        color: #5a5e69;
-    }}
+    #divider:hover {
+        color: $rule_hover;
+    }
 
-    #divider.-dragging {{
-        background: #0b0b0f;
-        color: #7ec850;
-    }}
+    #divider.-dragging {
+        color: $accent;
+    }
 
-    #results {{
+    #results {
         width: 44;
         height: 100%;
         border: none;
-        background: #0b0b0f;
-        color: #cfd0da;
+        background: $canvas;
+        color: $ink_dim;
         scrollbar-size: 0 0;
-    }}
+    }
+    """
 
-    """.format(
-        min_editor_widget_width=MIN_EDITOR_WIDGET_WIDTH,
-    )
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        return {"avocado-min-editor-width": str(MIN_EDITOR_WIDGET_WIDTH)}
+
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
@@ -353,6 +361,8 @@ class AvocadoApp(App):
 
     def __init__(self, file_path: str | None = None) -> None:
         super().__init__()
+        self.register_theme(DARK)
+        self.register_theme(LIGHT)
         self._launch_dir = Path.cwd().resolve(strict=False)
         self._file_path = (
             Path(file_path).expanduser().resolve(strict=False) if file_path else None
@@ -366,6 +376,23 @@ class AvocadoApp(App):
         self._banner_filename_start_x = 0
         self._last_results_full: list[str] = []
         self._last_clicked_result_line: int | None = None
+        self._accent = palette_for(DARK.name)["accent"]
+        self._muted = palette_for(DARK.name)["muted"]
+        self.theme = theme_name_for(detect_scheme())
+
+    def watch_theme(self, old_value: str, new_value: str) -> None:
+        palette = palette_for(new_value)
+        self._accent = palette["accent"]
+        self._muted = palette["muted"]
+        # This watcher fires from __init__ too, before the DOM exists.
+        if self.is_running:
+            self.call_after_refresh(self._update_banner)
+
+    def _sync_theme_to_system(self) -> None:
+        target = theme_name_for(detect_scheme())
+        if target != self.theme:
+            self.theme = target
+
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -413,6 +440,7 @@ class AvocadoApp(App):
         self._update_banner()
         self.call_later(self._update_banner)
         self._evaluate_now()
+        self.set_interval(2.0, self._sync_theme_to_system)
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "editor":
@@ -591,7 +619,7 @@ class AvocadoApp(App):
         first_line = Text(no_wrap=True)
 
         if self._file_path is None:
-            first_line.append(app_name, style=ACCENT)
+            first_line.append(app_name, style=self._accent)
             self._banner_right_start_x = content_w
             self._banner_filename_start_x = content_w
             self._banner_path_visible = False
@@ -609,19 +637,19 @@ class AvocadoApp(App):
             right_display_used_w = min(available_right_w, right_display_w) + 1
             gap_w = max(1, content_w - app_name_w - right_display_used_w)
 
-            first_line.append(app_name, style=ACCENT)
+            first_line.append(app_name, style=self._accent)
             first_line.append(" " * gap_w)
             self._banner_right_start_x = app_name_w + gap_w
 
             if self._banner_path_visible:
-                first_line.append(right_display, style="#8b8d97")
+                first_line.append(right_display, style=self._muted)
                 idx = right_display.rfind("\\")
                 if idx == -1:
                     idx = right_display.rfind("/")
                 if idx != -1 and idx + 1 < len(right_display):
                     self._banner_filename_start_x = self._banner_right_start_x + idx + 1
                     first_line.stylize(
-                        ACCENT,
+                        self._accent,
                         self._banner_filename_start_x,
                         self._banner_right_start_x + len(right_display),
                     )
@@ -629,7 +657,7 @@ class AvocadoApp(App):
                     self._banner_filename_start_x = self._banner_right_start_x
             else:
                 self._banner_filename_start_x = self._banner_right_start_x
-                first_line.append(right_display, style=ACCENT)
+                first_line.append(right_display, style=self._accent)
             first_line.append(" ")
 
         if first_line.cell_len < content_w:
